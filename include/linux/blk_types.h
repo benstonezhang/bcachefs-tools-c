@@ -16,6 +16,28 @@ typedef void (bio_end_io_t) (struct bio *);
 
 #define BDEVNAME_SIZE	32
 
+typedef unsigned int __bitwise blk_mode_t;
+
+/* open for reading */
+#define BLK_OPEN_READ		((__force blk_mode_t)(1 << 0))
+/* open for writing */
+#define BLK_OPEN_WRITE		((__force blk_mode_t)(1 << 1))
+/* open exclusively (vs other exclusive openers */
+#define BLK_OPEN_EXCL		((__force blk_mode_t)(1 << 2))
+/* opened with O_NDELAY */
+#define BLK_OPEN_NDELAY		((__force blk_mode_t)(1 << 3))
+/* open for "writes" only for ioctls (specialy hack for floppy.c) */
+#define BLK_OPEN_WRITE_IOCTL	((__force blk_mode_t)(1 << 4))
+
+#define BLK_OPEN_BUFFERED	((__force blk_mode_t)(1 << 5))
+
+struct inode {
+	unsigned long		i_ino;
+	loff_t			i_size;
+	struct super_block	*i_sb;
+	blk_mode_t		mode;
+};
+
 struct request_queue {
 	struct backing_dev_info *backing_dev_info;
 };
@@ -34,6 +56,7 @@ struct block_device {
 	dev_t			bd_dev;
 	char			name[BDEVNAME_SIZE];
 	struct inode		*bd_inode;
+	struct inode		__bd_inode;
 	struct request_queue	queue;
 	void			*bd_holder;
 	struct gendisk *	bd_disk;

@@ -162,17 +162,19 @@ sector_t get_capacity(struct gendisk *disk)
 	return bytes >> 9;
 }
 
-void blkdev_put(struct block_device *bdev, void *holder)
+void fput(struct file *file)
 {
+	struct block_device *bdev = file_bdev(file);
+
 	fdatasync(bdev->bd_fd);
 	close(bdev->bd_fd);
 	free(bdev);
+	free(file);
 }
 
-struct block_device *blkdev_get_by_path(const char *path, blk_mode_t mode,
-					void *holder, const struct blk_holder_ops *hop)
+struct file *bdev_file_open_by_path(const char *path, blk_mode_t mode,
+				    void *holder, const struct blk_holder_ops *hop)
 {
-	struct block_device *bdev;
 	int fd, flags = 0;
 
 	if ((mode & (BLK_OPEN_READ|BLK_OPEN_WRITE)) == (BLK_OPEN_READ|BLK_OPEN_WRITE))
@@ -192,7 +194,7 @@ struct block_device *blkdev_get_by_path(const char *path, blk_mode_t mode,
 	if (fd < 0)
 		return ERR_PTR(-errno);
 
-	bdev = malloc(sizeof(*bdev));
+	struct block_device *bdev = malloc(sizeof(*bdev));
 	memset(bdev, 0, sizeof(*bdev));
 
 	strncpy(bdev->name, path, sizeof(bdev->name));
@@ -204,13 +206,12 @@ struct block_device *blkdev_get_by_path(const char *path, blk_mode_t mode,
 	bdev->bd_disk		= &bdev->__bd_disk;
 	bdev->bd_disk->bdi	= &bdev->bd_disk->__bdi;
 	bdev->queue.backing_dev_info = bdev->bd_disk->bdi;
+	bdev->bd_inode		= &bdev->__bd_inode;
 
-	return bdev;
-}
+	struct file *file = calloc(sizeof(*file), 1);
+	file->f_inode = bdev->bd_inode;
 
-void bdput(struct block_device *bdev)
-{
-	BUG();
+	return file;
 }
 
 int lookup_bdev(const char *path, dev_t *dev)

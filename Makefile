@@ -1,6 +1,7 @@
-VERSION=1.4.0
+VERSION=1.7.0
 
 PREFIX?=/usr/local
+LIBEXECDIR?=$(PREFIX)/libexec
 PKG_CONFIG?=pkg-config
 INSTALL=install
 LN=ln
@@ -30,7 +31,7 @@ CFLAGS+=-std=gnu11 -O2 -g -MMD -Wall -fPIC			\
 	-Wno-deprecated-declarations				\
 	-fno-strict-aliasing					\
 	-fno-delete-null-pointer-checks				\
-	-I. -Iinclude -Iraid					\
+	-I. -Ic_src -Iinclude -Iraid				\
 	-D_FILE_OFFSET_BITS=64					\
 	-D_GNU_SOURCE						\
 	-D_LGPL_SOURCE						\
@@ -41,26 +42,12 @@ CFLAGS+=-std=gnu11 -O2 -g -MMD -Wall -fPIC			\
 	-DNO_BCACHEFS_FS					\
 	-DNO_BCACHEFS_SYSFS					\
 	-DVERSION_STRING='"$(VERSION)"'				\
+	-D__SANE_USERSPACE_TYPES__				\
 	$(EXTRA_CFLAGS)
 
 # Intenionally not doing the above to $(LDFLAGS) because we rely on
 # recursive expansion here (CFLAGS is not yet completely built by this line)
 LDFLAGS+=$(CFLAGS) $(EXTRA_LDFLAGS)
-
-ifdef CARGO_TOOLCHAIN_VERSION
-  CARGO_TOOLCHAIN = +$(CARGO_TOOLCHAIN_VERSION)
-endif
-
-CARGO_ARGS=${CARGO_TOOLCHAIN}
-CARGO=cargo $(CARGO_ARGS)
-CARGO_PROFILE=release
-# CARGO_PROFILE=debug
-CARGO_MANIFEST=--manifest-path rust-src/Cargo.toml
-
-CARGO_BUILD_ARGS=--$(CARGO_PROFILE)
-CARGO_BUILD=$(CARGO) build $(CARGO_BUILD_ARGS) $(CARGO_MANIFEST)
-
-CARGO_CLEAN=$(CARGO) clean $(CARGO_CLEAN_ARGS) $(CARGO_MANIFEST)
 
 include Makefile.compiler
 
@@ -173,11 +160,7 @@ OBJS:=$(SRCS:.c=.o)
 
 BCACHEFS_DEPS=libbcachefs.a
 
-ifndef NO_RUST
-	BCACHEFS_DEPS+=rust-src/target/release/libbcachefs_rust.a
-else
-	CFLAGS+=-DBCACHEFS_NO_RUST
-endif
+CFLAGS+=-DBCACHEFS_NO_RUST
 
 bcachefs: $(BCACHEFS_DEPS)
 	@echo "    [LD]     $@"
@@ -186,10 +169,6 @@ bcachefs: $(BCACHEFS_DEPS)
 libbcachefs.a: $(filter-out ./tests/%.o, $(OBJS))
 	@echo "    [AR]     $@"
 	$(Q)ar -rc $@ $+
-
-RUST_SRCS:=$(shell find rust-src/src rust-src/bch_bindgen/src -type f -iname '*.rs')
-rust-src/target/release/libbcachefs_rust.a: $(RUST_SRCS)
-	$(CARGO_BUILD)
 
 tests/test_helper: $(filter ./tests/%.o, $(OBJS))
 	@echo "    [LD]     $@"
@@ -224,6 +203,7 @@ install: bcachefs $(optional_install)
 
 	sed -i '/^# Note: make install replaces/,$$d' $(DESTDIR)$(INITRAMFS_HOOK)
 	echo "copy_exec $(ROOT_SBINDIR)/bcachefs /sbin/bcachefs" >> $(DESTDIR)$(INITRAMFS_HOOK)
+	echo "copy_exec $(ROOT_SBINDIR)/mount.bcachefs /sbin/mount.bcachefs" >> $(DESTDIR)$(INITRAMFS_HOOK)
 
 .PHONY: install_systemd
 install_systemd: $(systemd_services) $(systemd_libexecfiles)
@@ -233,7 +213,7 @@ install_systemd: $(systemd_services) $(systemd_libexecfiles)
 .PHONY: clean
 clean:
 	@echo "Cleaning all"
-	$(Q)$(RM) bcachefs libbcachefs.a tests/test_helper .version *.tar.xz $(OBJS) $(DEPS) $(DOCGENERATED)
+	$(Q)$(RM) libbcachefs.a c_src/libbcachefs.a tests/test_helper .version *.tar.xz $(OBJS) $(DEPS) $(DOCGENERATED)
 	$(Q)$(CARGO_CLEAN)
 	$(Q)$(RM) -f $(built_scripts)
 
@@ -251,17 +231,13 @@ bcachefs-principles-of-operation.pdf: doc/bcachefs-principles-of-operation.tex
 
 doc: bcachefs-principles-of-operation.pdf
 
-.PHONY: cargo-update-msrv
-cargo-update-msrv:
-	cargo +nightly generate-lockfile --manifest-path rust-src/Cargo.toml -Zmsrv-policy
-	cargo +nightly generate-lockfile --manifest-path rust-src/bch_bindgen/Cargo.toml -Zmsrv-policy
-
 .PHONY: update-bcachefs-sources
 update-bcachefs-sources:
 	git rm -rf --ignore-unmatch libbcachefs
 	test -d libbcachefs || mkdir libbcachefs
 	cp $(LINUX_DIR)/fs/bcachefs/*.[ch] libbcachefs/
 	git add libbcachefs/*.[ch]
+	git rm -f libbcachefs/mean_and_variance_test.c
 	cp $(LINUX_DIR)/include/linux/closure.h include/linux/
 	git add include/linux/closure.h
 	cp $(LINUX_DIR)/lib/closure.c linux/
@@ -282,11 +258,6 @@ update-bcachefs-sources:
 	git add include/linux/kmemleak.h
 	cp $(LINUX_DIR)/lib/math/int_sqrt.c linux/
 	git add linux/int_sqrt.c
-	git rm -f libbcachefs/mean_and_variance_test.c
-#	cp $(LINUX_DIR)/lib/math/mean_and_variance.c linux/
-#	git add linux/mean_and_variance.c
-#	cp $(LINUX_DIR)/include/linux/mean_and_variance.h include/linux/
-#	git add include/linux/mean_and_variance.h
 	cp $(LINUX_DIR)/scripts/Makefile.compiler ./
 	git add Makefile.compiler
 	$(RM) libbcachefs/*.mod.c

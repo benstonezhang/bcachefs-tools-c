@@ -17,14 +17,15 @@
 #include "btree_iter.h"
 #include "btree_key_cache.h"
 #include "btree_update.h"
-#include "btree_update_interior.h"
 #include "btree_gc.h"
 #include "buckets.h"
 #include "clock.h"
+#include "compress.h"
 #include "disk_groups.h"
 #include "ec.h"
 #include "inode.h"
 #include "journal.h"
+#include "journal_reclaim.h"
 #include "keylist.h"
 #include "move.h"
 #include "movinggc.h"
@@ -138,6 +139,7 @@ do {									\
 write_attribute(trigger_gc);
 write_attribute(trigger_discards);
 write_attribute(trigger_invalidates);
+write_attribute(trigger_journal_flush);
 write_attribute(prune_cache);
 write_attribute(btree_wakeup);
 rw_attribute(btree_gc_periodic);
@@ -165,7 +167,6 @@ read_attribute(btree_write_stats);
 read_attribute(btree_cache_size);
 read_attribute(compression_stats);
 read_attribute(journal_debug);
-read_attribute(btree_updates);
 read_attribute(btree_cache);
 read_attribute(btree_key_cache);
 read_attribute(stripes_heap);
@@ -247,7 +248,7 @@ static size_t bch2_btree_cache_size(struct bch_fs *c)
 
 	mutex_lock(&c->btree_cache.lock);
 	list_for_each_entry(b, &c->btree_cache.live, list)
-		ret += btree_bytes(c);
+		ret += btree_buf_bytes(b);
 
 	mutex_unlock(&c->btree_cache.lock);
 	return ret;
@@ -330,7 +331,7 @@ static int bch2_compression_stats_to_text(struct printbuf *out, struct bch_fs *c
 	prt_newline(out);
 
 	for (unsigned i = 0; i < ARRAY_SIZE(s); i++) {
-		prt_str(out, bch2_compression_types[i]);
+		bch2_prt_compression_type(out, i);
 		prt_tab(out);
 
 		prt_human_readable_u64(out, s[i].sectors_compressed << 9);
@@ -413,9 +414,6 @@ SHOW(bch2_fs)
 
 	if (attr == &sysfs_journal_debug)
 		bch2_journal_debug_to_text(out, &c->journal);
-
-	if (attr == &sysfs_btree_updates)
-		bch2_btree_updates_to_text(out, c);
 
 	if (attr == &sysfs_btree_cache)
 		bch2_btree_cache_to_text(out, c);
@@ -504,7 +502,7 @@ STORE(bch2_fs)
 
 	/* Debugging: */
 
-	if (!test_bit(BCH_FS_rw, &c->flags))
+	if (!bch2_write_ref_tryget(c, BCH_WRITE_REF_sysfs))
 		return -EROFS;
 
 	if (attr == &sysfs_prune_cache) {
@@ -537,6 +535,11 @@ STORE(bch2_fs)
 	if (attr == &sysfs_trigger_invalidates)
 		bch2_do_invalidates(c);
 
+	if (attr == &sysfs_trigger_journal_flush) {
+		bch2_journal_flush_all_pins(&c->journal);
+		bch2_journal_meta(&c->journal);
+	}
+
 #ifdef CONFIG_BCACHEFS_TESTS
 	if (attr == &sysfs_perf_test) {
 		char *tmp = kstrdup(buf, GFP_KERNEL), *p = tmp;
@@ -557,6 +560,7 @@ STORE(bch2_fs)
 			size = ret;
 	}
 #endif
+	bch2_write_ref_put(c, BCH_WRITE_REF_sysfs);
 	return size;
 }
 SYSFS_OPS(bch2_fs);
@@ -638,7 +642,6 @@ SYSFS_OPS(bch2_fs_internal);
 struct attribute *bch2_fs_internal_files[] = {
 	&sysfs_flags,
 	&sysfs_journal_debug,
-	&sysfs_btree_updates,
 	&sysfs_btree_cache,
 	&sysfs_btree_key_cache,
 	&sysfs_new_stripes,
@@ -656,6 +659,7 @@ struct attribute *bch2_fs_internal_files[] = {
 	&sysfs_trigger_gc,
 	&sysfs_trigger_discards,
 	&sysfs_trigger_invalidates,
+	&sysfs_trigger_journal_flush,
 	&sysfs_prune_cache,
 	&sysfs_btree_wakeup,
 
@@ -725,8 +729,10 @@ STORE(bch2_fs_opts_dir)
 	bch2_opt_set_sb(c, opt, v);
 	bch2_opt_set_by_id(&c->opts, id, v);
 
-	if ((id == Opt_background_target ||
-	     id == Opt_background_compression) && v)
+	if (v &&
+	    (id == Opt_background_target ||
+	     id == Opt_background_compression ||
+	     (id == Opt_compression && !c->opts.background_compression)))
 		bch2_set_rebalance_needs_scan(c, 0);
 
 	ret = size;
@@ -883,7 +889,7 @@ static void dev_io_done_to_text(struct printbuf *out, struct bch_dev *ca)
 
 		for (i = 1; i < BCH_DATA_NR; i++)
 			prt_printf(out, "%-12s:%12llu\n",
-			       bch2_data_types[i],
+			       bch2_data_type_str(i),
 			       percpu_u64_get(&ca->io_done->sectors[rw][i]) << 9);
 	}
 }
@@ -908,7 +914,7 @@ SHOW(bch2_dev)
 	}
 
 	if (attr == &sysfs_has_data) {
-		prt_bitflags(out, bch2_data_types, bch2_dev_has_data(c, ca));
+		prt_bitflags(out, __bch2_data_types, bch2_dev_has_data(c, ca));
 		prt_char(out, '\n');
 	}
 
@@ -927,10 +933,10 @@ SHOW(bch2_dev)
 	sysfs_print(io_latency_write,		atomic64_read(&ca->cur_latency[WRITE]));
 
 	if (attr == &sysfs_io_latency_stats_read)
-		bch2_time_stats_to_text(out, &ca->io_latency[READ]);
+		bch2_time_stats_to_text(out, &ca->io_latency[READ].stats);
 
 	if (attr == &sysfs_io_latency_stats_write)
-		bch2_time_stats_to_text(out, &ca->io_latency[WRITE]);
+		bch2_time_stats_to_text(out, &ca->io_latency[WRITE].stats);
 
 	sysfs_printf(congested,			"%u%%",
 		     clamp(atomic_read(&ca->congested), 0, CONGESTED_MAX)

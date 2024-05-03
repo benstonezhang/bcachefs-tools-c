@@ -79,7 +79,7 @@ void bch2_inode_flush_nocow_writes_async(struct bch_fs *c,
 			continue;
 
 		bio = container_of(bio_alloc_bioset(ca->disk_sb.bdev, 0,
-						    REQ_OP_FLUSH,
+						    REQ_OP_WRITE|REQ_PREFLUSH,
 						    GFP_KERNEL,
 						    &c->nocow_flush_bioset),
 				   struct nocow_flush, bio);
@@ -174,18 +174,18 @@ void __bch2_i_sectors_acct(struct bch_fs *c, struct bch_inode_info *inode,
 static int bch2_flush_inode(struct bch_fs *c,
 			    struct bch_inode_info *inode)
 {
-	struct bch_inode_unpacked u;
-	int ret;
-
 	if (c->opts.journal_flush_disabled)
 		return 0;
 
-	ret = bch2_inode_find_by_inum(c, inode_inum(inode), &u);
-	if (ret)
-		return ret;
+	if (!bch2_write_ref_tryget(c, BCH_WRITE_REF_fsync))
+		return -EROFS;
 
-	return bch2_journal_flush_seq(&c->journal, u.bi_journal_seq) ?:
-		bch2_inode_flush_nocow_writes(c, inode);
+	struct bch_inode_unpacked u;
+	int ret = bch2_inode_find_by_inum(c, inode_inum(inode), &u) ?:
+		  bch2_journal_flush_seq(&c->journal, u.bi_journal_seq) ?:
+		  bch2_inode_flush_nocow_writes(c, inode);
+	bch2_write_ref_put(c, BCH_WRITE_REF_fsync);
+	return ret;
 }
 
 int bch2_fsync(struct file *file, loff_t start, loff_t end, int datasync)
@@ -675,8 +675,11 @@ static int __bchfs_fallocate(struct bch_inode_info *inode, int mode,
 
 		bch2_i_sectors_acct(c, inode, &quota_res, i_sectors_delta);
 
-		drop_locks_do(trans,
-			(bch2_mark_pagecache_reserved(inode, hole_start, iter.pos.offset), 0));
+		if (bch2_mark_pagecache_reserved(inode, &hole_start,
+						 iter.pos.offset, true))
+			drop_locks_do(trans,
+				bch2_mark_pagecache_reserved(inode, &hole_start,
+							     iter.pos.offset, false));
 bkey_err:
 		bch2_quota_reservation_put(c, inode, &quota_res);
 		if (bch2_err_matches(ret, BCH_ERR_transaction_restart))

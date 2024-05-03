@@ -306,6 +306,20 @@ struct bio *bio_kmalloc(unsigned int nr_iovecs, gfp_t gfp_mask)
 	return bio;
 }
 
+struct bio *bio_alloc(struct block_device *bdev, unsigned nr_iovecs,
+		      blk_opf_t opf, gfp_t gfp_mask)
+{
+	struct bio *bio;
+
+	bio = kmalloc(sizeof(struct bio) +
+		      sizeof(struct bio_vec) * nr_iovecs, gfp_mask);
+	if (unlikely(!bio))
+		return NULL;
+	bio_init(bio, bdev, nr_iovecs ? bio->bi_inline_vecs : NULL, nr_iovecs, opf);
+	bio->bi_pool = NULL;
+	return bio;
+}
+
 static struct bio_vec *bvec_alloc(mempool_t *pool, int *nr_vecs,
 		gfp_t gfp_mask)
 {

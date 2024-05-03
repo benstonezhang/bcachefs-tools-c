@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 BASE_PATH= os.path.dirname(__file__)
-BCH_PATH = os.path.abspath(os.path.join(BASE_PATH, '..', 'bcachefs'))
+BCH_PATH = os.path.abspath(os.path.join(BASE_PATH, '../target/release', 'bcachefs'))
 VALGRIND_PATH= os.path.abspath(os.path.join(BASE_PATH,
     'valgrind-suppressions.txt'))
 

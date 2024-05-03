@@ -20,6 +20,11 @@
 #define ARCH_KMALLOC_MINALIGN		16
 #define KMALLOC_MAX_SIZE		SIZE_MAX
 
+static inline size_t kmalloc_size_roundup(size_t s)
+{
+	return roundup_pow_of_two(s);
+}
+
 static inline void *kmalloc_noprof(size_t size, gfp_t flags)
 {
 	unsigned i;

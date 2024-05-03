@@ -23,27 +23,6 @@ struct user_namespace;
 #define MINOR(dev)	((unsigned int) ((dev) & MINORMASK))
 #define MKDEV(ma,mi)	(((ma) << MINORBITS) | (mi))
 
-typedef unsigned int __bitwise blk_mode_t;
-
-/* open for reading */
-#define BLK_OPEN_READ		((__force blk_mode_t)(1 << 0))
-/* open for writing */
-#define BLK_OPEN_WRITE		((__force blk_mode_t)(1 << 1))
-/* open exclusively (vs other exclusive openers */
-#define BLK_OPEN_EXCL		((__force blk_mode_t)(1 << 2))
-/* opened with O_NDELAY */
-#define BLK_OPEN_NDELAY		((__force blk_mode_t)(1 << 3))
-/* open for "writes" only for ioctls (specialy hack for floppy.c) */
-#define BLK_OPEN_WRITE_IOCTL	((__force blk_mode_t)(1 << 4))
-
-#define BLK_OPEN_BUFFERED	((__force blk_mode_t)(1 << 5))
-
-struct inode {
-	unsigned long		i_ino;
-	loff_t			i_size;
-	struct super_block	*i_sb;
-};
-
 struct file {
 	struct inode		*f_inode;
 };
@@ -89,10 +68,14 @@ struct blk_holder_ops {
         void (*mark_dead)(struct block_device *bdev);
 };
 
-void blkdev_put(struct block_device *bdev, void *holder);
-void bdput(struct block_device *bdev);
-struct block_device *blkdev_get_by_path(const char *path, blk_mode_t mode,
-					void *holder, const struct blk_holder_ops *hop);
+static inline struct block_device *file_bdev(struct file *file)
+{
+	return container_of(file->f_inode, struct block_device, __bd_inode);
+}
+
+void fput(struct file *);
+struct file *bdev_file_open_by_path(const char *, blk_mode_t, void *,
+				    const struct blk_holder_ops *);
 int lookup_bdev(const char *path, dev_t *);
 
 struct super_block {

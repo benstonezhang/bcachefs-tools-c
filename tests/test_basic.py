@@ -45,7 +45,7 @@ def test_list_inodes(tmpdir):
 
     assert ret.returncode == 0
     assert len(ret.stderr) == 0
-    assert len(ret.stdout.splitlines()) == (2 + 2) # 2 inodes on clean format
+    assert len(ret.stdout.splitlines()) == (67)
 
 def test_list_dirent(tmpdir):
     dev = util.format_1g(tmpdir)
@@ -54,10 +54,14 @@ def test_list_dirent(tmpdir):
 
     assert ret.returncode == 0
     assert len(ret.stderr) == 0
-    assert len(ret.stdout.splitlines()) == (2 + 1) # 1 dirent
+    assert len(ret.stdout.splitlines()) == (6) # See example:
 
     # Example:
-    # u64s 8 type dirent 4096:2449855786607753081
-    # snap 0 len 0 ver 0: lost+found -> 4097
-    last = ret.stdout.splitlines()[-1]
+    # mounting version 1.6: btree_subvolume_children opts=ro,errors=continue,degraded,nochanges,norecovery,read_only
+    # recovering from clean shutdown, journal seq 9
+    # alloc_read... done
+    # stripes_read... done
+    # snapshots_read... done
+    # u64s 8 type dirent 4096:453699834857023875:U32_MAX len 0 ver 0: lost+found -> 4097 type dir
+    last = ret.stdout.splitlines()[0]
     assert re.match(r'^.*type dirent.*: lost\+found ->.*$', last)

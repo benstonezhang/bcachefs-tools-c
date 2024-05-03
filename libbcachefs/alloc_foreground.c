@@ -188,8 +188,10 @@ long bch2_bucket_alloc_new_fs(struct bch_dev *ca)
 static inline unsigned open_buckets_reserved(enum bch_watermark watermark)
 {
 	switch (watermark) {
-	case BCH_WATERMARK_reclaim:
+	case BCH_WATERMARK_interior_updates:
 		return 0;
+	case BCH_WATERMARK_reclaim:
+		return OPEN_BUCKETS_COUNT / 6;
 	case BCH_WATERMARK_btree:
 	case BCH_WATERMARK_btree_copygc:
 		return OPEN_BUCKETS_COUNT / 4;
@@ -236,8 +238,7 @@ static struct open_bucket *__try_alloc_bucket(struct bch_fs *c, struct bch_dev *
 		if (cl)
 			closure_wait(&c->open_buckets_wait, cl);
 
-		track_event_change(&c->times[BCH_TIME_blocked_allocate_open_bucket],
-				   &c->blocked_allocate_open_bucket, true);
+		track_event_change(&c->times[BCH_TIME_blocked_allocate_open_bucket], true);
 		spin_unlock(&c->freelist_lock);
 		return ERR_PTR(-BCH_ERR_open_buckets_empty);
 	}
@@ -263,11 +264,8 @@ static struct open_bucket *__try_alloc_bucket(struct bch_fs *c, struct bch_dev *
 	ca->nr_open_buckets++;
 	bch2_open_bucket_hash_add(c, ob);
 
-	track_event_change(&c->times[BCH_TIME_blocked_allocate_open_bucket],
-			   &c->blocked_allocate_open_bucket, false);
-
-	track_event_change(&c->times[BCH_TIME_blocked_allocate],
-			   &c->blocked_allocate, false);
+	track_event_change(&c->times[BCH_TIME_blocked_allocate_open_bucket], false);
+	track_event_change(&c->times[BCH_TIME_blocked_allocate], false);
 
 	spin_unlock(&c->freelist_lock);
 	return ob;
@@ -555,8 +553,7 @@ again:
 			goto again;
 		}
 
-		track_event_change(&c->times[BCH_TIME_blocked_allocate],
-				   &c->blocked_allocate, true);
+		track_event_change(&c->times[BCH_TIME_blocked_allocate], true);
 
 		ob = ERR_PTR(-BCH_ERR_freelist_empty);
 		goto err;
@@ -1361,15 +1358,17 @@ retry:
 
 		/* Don't retry from all devices if we're out of open buckets: */
 		if (bch2_err_matches(ret, BCH_ERR_open_buckets_empty)) {
-			int ret = open_bucket_add_buckets(trans, &ptrs, wp, devs_have,
+			int ret2 = open_bucket_add_buckets(trans, &ptrs, wp, devs_have,
 					      target, erasure_code,
 					      nr_replicas, &nr_effective,
 					      &have_cache, watermark,
 					      flags, cl);
-			if (!ret ||
-			    bch2_err_matches(ret, BCH_ERR_transaction_restart) ||
-			    bch2_err_matches(ret, BCH_ERR_open_buckets_empty))
+			if (!ret2 ||
+			    bch2_err_matches(ret2, BCH_ERR_transaction_restart) ||
+			    bch2_err_matches(ret2, BCH_ERR_open_buckets_empty)) {
+				ret = ret2;
 				goto alloc_done;
+			}
 		}
 
 		/*
@@ -1525,10 +1524,11 @@ static void bch2_open_bucket_to_text(struct printbuf *out, struct bch_fs *c, str
 	unsigned data_type = ob->data_type;
 	barrier(); /* READ_ONCE() doesn't work on bitfields */
 
-	prt_printf(out, "%zu ref %u %s %u:%llu gen %u allocated %u/%u",
+	prt_printf(out, "%zu ref %u ",
 		   ob - c->open_buckets,
-		   atomic_read(&ob->pin),
-		   data_type < BCH_DATA_NR ? bch2_data_types[data_type] : "invalid data type",
+		   atomic_read(&ob->pin));
+	bch2_prt_data_type(out, data_type);
+	prt_printf(out, " %u:%llu gen %u allocated %u/%u",
 		   ob->dev, ob->bucket, ob->gen,
 		   ca->mi.bucket_size - ob->sectors_free, ca->mi.bucket_size);
 	if (ob->ec)

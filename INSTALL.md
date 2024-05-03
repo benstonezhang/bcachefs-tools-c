@@ -16,17 +16,13 @@ Build dependencies:
  * valgrind
  * zlib1g
 
-In addition a recent Rust toolchain is required (rustc, cargo), either by using
-[rustup](https://rustup.rs/) or make sure to use a distribution where rustc (>=1.65)
-is available.
-
 Debian (Bullseye or later) and Ubuntu (20.04 or later): you can install these with
 
 ``` shell
 apt install -y pkg-config libaio-dev libblkid-dev libkeyutils-dev \
     liblz4-dev libsodium-dev liburcu-dev libzstd-dev \
     uuid-dev zlib1g-dev valgrind libudev-dev udev git build-essential \
-    python3 python3-docutils libclang-dev
+    python3 python3-docutils libclang-dev debhelper dh-python
 ```
 
 Fedora: install the "Development tools" group along with:

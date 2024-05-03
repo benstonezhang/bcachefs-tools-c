@@ -185,8 +185,7 @@ not_found:
 		} else {
 			bkey_error_init(update);
 			update->k.p		= p.k->p;
-			update->k.p.offset	= next_idx;
-			update->k.size		= next_idx - *idx;
+			update->k.size		= p.k->size;
 			set_bkey_val_u64s(&update->k, 0);
 		}
 
@@ -292,22 +291,14 @@ static inline void check_indirect_extent_deleting(struct bkey_s new, unsigned *f
 	}
 }
 
-int bch2_trans_mark_reflink_v(struct btree_trans *trans,
-			      enum btree_id btree_id, unsigned level,
-			      struct bkey_s_c old, struct bkey_s new,
-			      unsigned flags)
+int bch2_trigger_reflink_v(struct btree_trans *trans,
+			   enum btree_id btree_id, unsigned level,
+			   struct bkey_s_c old, struct bkey_s new,
+			   unsigned flags)
 {
 	if ((flags & BTREE_TRIGGER_TRANSACTIONAL) &&
 	    (flags & BTREE_TRIGGER_INSERT))
 		check_indirect_extent_deleting(new, &flags);
-
-	if (old.k->type == KEY_TYPE_reflink_v &&
-	    new.k->type == KEY_TYPE_reflink_v &&
-	    old.k->u64s == new.k->u64s &&
-	    !memcmp(bkey_s_c_to_reflink_v(old).v->start,
-		    bkey_s_to_reflink_v(new).v->start,
-		    bkey_val_bytes(new.k) - 8))
-		return 0;
 
 	return bch2_trigger_extent(trans, btree_id, level, old, new, flags);
 }
@@ -332,7 +323,7 @@ void bch2_indirect_inline_data_to_text(struct printbuf *out,
 	       min(datalen, 32U), d.v->data);
 }
 
-int bch2_trans_mark_indirect_inline_data(struct btree_trans *trans,
+int bch2_trigger_indirect_inline_data(struct btree_trans *trans,
 			      enum btree_id btree_id, unsigned level,
 			      struct bkey_s_c old, struct bkey_s new,
 			      unsigned flags)
@@ -494,6 +485,13 @@ s64 bch2_remap_range(struct bch_fs *c,
 
 		bch2_btree_iter_set_snapshot(&dst_iter, dst_snapshot);
 
+		if (dst_inum.inum < src_inum.inum) {
+			/* Avoid some lock cycle transaction restarts */
+			ret = bch2_btree_iter_traverse(&dst_iter);
+			if (ret)
+				continue;
+		}
+
 		dst_done = dst_iter.pos.offset - dst_start.offset;
 		src_want = POS(src_start.inode, src_start.offset + dst_done);
 		bch2_btree_iter_set_pos(&src_iter, src_want);
@@ -546,9 +544,7 @@ s64 bch2_remap_range(struct bch_fs *c,
 				min(src_k.k->p.offset - src_want.offset,
 				    dst_end.offset - dst_iter.pos.offset));
 
-		ret =   bch2_bkey_set_needs_rebalance(c, new_dst.k,
-					opts.background_target,
-					opts.background_compression) ?:
+		ret =   bch2_bkey_set_needs_rebalance(c, new_dst.k, &opts) ?:
 			bch2_extent_update(trans, dst_inum, &dst_iter,
 					new_dst.k, &disk_res,
 					new_i_size, i_sectors_delta,

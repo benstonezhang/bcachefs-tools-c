@@ -235,12 +235,16 @@ enum {
 
 struct bio *bio_alloc_bioset(struct block_device *, unsigned,
 			     blk_opf_t, gfp_t, struct bio_set *);
+
 extern void bio_put(struct bio *);
 
 int bio_add_page(struct bio *, struct page *, unsigned, unsigned);
 
 struct bio *bio_alloc_clone(struct block_device *, struct bio *,
 			    gfp_t, struct bio_set *);
+
+struct bio *bio_alloc(struct block_device *, unsigned,
+		      blk_opf_t, gfp_t);
 
 struct bio *bio_kmalloc(unsigned int, gfp_t);
 

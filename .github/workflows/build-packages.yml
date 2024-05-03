@@ -23,10 +23,6 @@ jobs:
               equivs devscripts
           mk-build-deps
           sudo apt install ./bcachefs-tools-build-deps_*.deb
-      - name: Setup Rust
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
       - name: Make deb
         run: |
           make -j`nproc` deb
@@ -46,10 +42,6 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install build essentials
         run: dnf install -y nodejs make rpmdevtools yum-utils
-      - name: Setup Rust
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
       - name: Install build-deps
         run: dnf builddep -y packaging/bcachefs-tools.spec
       - name: Make rpm
@@ -61,29 +53,3 @@ jobs:
         with:
           name: bcachefs-tools-rpm
           path: rpmbuild
-
-  msrv:
-    name: bcachefs-tools-msrv
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Disable initramfs update
-        run: sudo sed -i 's/yes/no/g' /etc/initramfs-tools/update-initramfs.conf
-      - name: Disable man-db update
-        run: sudo rm -f /var/lib/man-db/auto-update
-      - name: Install build-deps
-        run: |
-          sudo apt-get update && sudo apt-get -y --no-install-recommends install pkg-config libaio-dev libblkid-dev \
-              libkeyutils-dev liblz4-dev libsodium-dev liburcu-dev libzstd-dev \
-              uuid-dev zlib1g-dev valgrind libudev-dev python3-docutils libclang-dev
-      - name: Extract MSRV
-        run: |
-          MSRV=$(cargo metadata --format-version 1 --no-deps --manifest-path rust-src/Cargo.toml |
-                  jq -r '.packages[] | select(.name == "bcachefs-rust") | .rust_version')
-          echo "MSRV=$MSRV" >> $GITHUB_ENV
-      - name: Install Rust ${{ env.MSRV }} toolchain
-        run: |
-          rustup install --profile minimal ${{ env.MSRV }}
-      - name: Make
-        run: |
-          CARGO_TOOLCHAIN_VERSION=${{ env.MSRV }} make -j`nproc`

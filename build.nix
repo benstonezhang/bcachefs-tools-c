@@ -33,18 +33,7 @@ in stdenv.mkDerivation {
     udev
   ] ++ lib.optional fuseSupport fuse3;
 
-  BCACHEFS_FUSE = if fuseSupport then "1" else "";
-
-  cargoRoot = "rust-src";
-  # when git-based crates are updated, run:
-  # nix run github:Mic92/nix-update -- --version=skip --flake default
-  # to update the hashes
-  cargoDeps = rustPlatform.importCargoLock {
-    lockFile = "${src}/rust-src/Cargo.lock";
-    outputHashes = {
-      "bindgen-0.64.0" = "sha256-GNG8as33HLRYJGYe0nw6qBzq86aHiGonyynEM7gaEE4=";
-    };
-  };
+  ${if fuseSupport then "BCACHEFS_FUSE" else null} = "1";
 
   makeFlags = [ "DESTDIR=${placeholder "out"}" "PREFIX=" "VERSION=${commit}" ];
 

@@ -3,6 +3,7 @@
 
 #include <string.h>
 #include <linux/bitops.h>
+#include <linux/kernel.h>
 #include <stdlib.h>
 
 #define DECLARE_BITMAP(name,bits) \

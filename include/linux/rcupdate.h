@@ -13,6 +13,7 @@
 
 #define kfree_rcu(ptr, rcu_head)	kfree(ptr) /* XXX */
 #define kfree_rcu_mightsleep(ptr)	kfree(ptr) /* XXX */
+#define kvfree_rcu(ptr, rcu_head)	kfree(ptr) /* XXX */
 #define kvfree_rcu_mightsleep(ptr)	kfree(ptr) /* XXX */
 
 #define RCU_INIT_POINTER(p, v)		WRITE_ONCE(p, v)
