@@ -171,6 +171,9 @@ int cmd_fsck(int argc, char *argv[])
 	int opt, ret = 0;
 	struct printbuf opts_str = PRINTBUF;
 
+	if (getenv("BCACHEFS_KERNEL_ONLY"))
+		kernel = true;
+
 	append_opt(&opts_str, "degraded");
 	append_opt(&opts_str, "fsck");
 	append_opt(&opts_str, "fix_errors=ask");

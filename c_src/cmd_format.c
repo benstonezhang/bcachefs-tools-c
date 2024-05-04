@@ -128,6 +128,9 @@ int cmd_format(int argc, char *argv[])
 		bch2_cmdline_opts_get(&argc, argv, OPT_FORMAT);
 	struct bch_opts fs_opts = bch2_parse_opts(fs_opt_strs);
 
+	if (getenv("BCACHEFS_KERNEL_ONLY"))
+		initialize = false;
+
 	while ((opt = getopt_long(argc, argv,
 				  "-L:U:g:fqhv",
 				  format_opts,
