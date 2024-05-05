@@ -14,14 +14,6 @@ ifndef BUILD_VERBOSE
   BUILD_VERBOSE = 0
 endif
 
-ifeq ($(BUILD_VERBOSE),1)
-  Q =
-  CARGO_CLEAN_ARGS = --verbose
-else
-  Q = @
-  CARGO_CLEAN_ARGS = --quiet
-endif
-
 # Prevent recursive expansions of $(CFLAGS) to avoid repeatedly performing
 # compile tests
 CFLAGS:=$(CFLAGS)
@@ -160,8 +152,6 @@ OBJS:=$(SRCS:.c=.o)
 
 BCACHEFS_DEPS=libbcachefs.a
 
-CFLAGS+=-DBCACHEFS_NO_RUST
-
 bcachefs: $(BCACHEFS_DEPS)
 	@echo "    [LD]     $@"
 	$(Q)$(CC) $(LDFLAGS) -Wl,--whole-archive $+ $(LOADLIBES) -Wl,--no-whole-archive $(LDLIBS) -o $@
@@ -214,7 +204,6 @@ install_systemd: $(systemd_services) $(systemd_libexecfiles)
 clean:
 	@echo "Cleaning all"
 	$(Q)$(RM) libbcachefs.a c_src/libbcachefs.a tests/test_helper .version *.tar.xz $(OBJS) $(DEPS) $(DOCGENERATED)
-	$(Q)$(CARGO_CLEAN)
 	$(Q)$(RM) -f $(built_scripts)
 
 .PHONY: deb

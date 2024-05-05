@@ -9,7 +9,6 @@ URL:            https://github.com/koverstreet/bcachefs-tools
 
 BuildRequires:  gcc
 BuildRequires:  make
-BuildRequires:  cargo
 BuildRequires:  clang-devel
 BuildRequires:  keyutils-libs-devel
 BuildRequires:  libaio-devel

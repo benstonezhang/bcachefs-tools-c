@@ -29,7 +29,7 @@
 
         formatter = pkgs.nixfmt;
 
-        devShells.default = pkgs.callPackage ({ mkShell, rustc, cargo, gnumake
+        devShells.default = pkgs.callPackage ({ mkShell, gnumake
           , gcc, clang, pkg-config, libuuid, libsodium, keyutils, liburcu, zlib
           , libaio, zstd, lz4, udev, bcachefs }:
           mkShell {

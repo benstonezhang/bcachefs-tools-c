@@ -60,4 +60,8 @@ int fs_cmds(int argc, char *argv[]);
 int data_cmds(int argc, char *argv[]);
 int subvolume_cmds(int argc, char *argv[]);
 
+int cmd_mount(int argc, char *argv[]);
+int cmd_list(int argc, char *argv[]);
+int cmd_completions(int argc, char *argv[]);
+
 #endif /* _CMDS_H */

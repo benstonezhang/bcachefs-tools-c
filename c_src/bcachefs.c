@@ -94,7 +94,7 @@ void bcachefs_usage(void)
 	     "  fusemount                Mount a filesystem via FUSE\n"
 	     "\n"
 	     "Miscellaneous:\n"
-         "  completions              Generate shell completions\n"
+	     "  completions              Generate shell completions\n"
 	     "  version                  Display the version of the invoked bcachefs tool\n");
 }
 
@@ -197,10 +197,8 @@ int main(int argc, char *argv[])
 		return cmd_fusemount(argc, argv);
 #endif
 
-#ifndef BCACHEFS_NO_RUST
 	if (strstr(full_cmd, "mount"))
-		return rust_main(argc, argv, "mount");
-#endif
+		return cmd_mount(argc, argv);
 
 	setvbuf(stdout, NULL, _IOLBF, 0);
 
@@ -257,24 +255,24 @@ int main(int argc, char *argv[])
 
 	if (!strcmp(cmd, "dump"))
 		return cmd_dump(argc, argv);
+	if (!strcmp(cmd, "list"))
+		return cmd_list(argc, argv);
 	if (!strcmp(cmd, "list_journal"))
 		return cmd_list_journal(argc, argv);
-	if (!strcmp(cmd, "kill_btree_node"))
-		return cmd_kill_btree_node(argc, argv);
 
 	if (!strcmp(cmd, "setattr"))
 		return cmd_setattr(argc, argv);
-#ifndef BCACHEFS_NO_RUST
-	if (!strcmp(cmd, "list") ||
-	    !strcmp(cmd, "mount") ||
-	    !strcmp(cmd, "completions"))
-		return rust_main(argc, argv, cmd);
-#endif
+
+	if (!strcmp(cmd, "completions"))
+		return cmd_completions(argc, argv);
 
 #ifdef BCACHEFS_FUSE
 	if (!strcmp(cmd, "fusemount"))
 		return cmd_fusemount(argc, argv);
 #endif
+
+	if (!strcmp(cmd, "mount"))
+		return cmd_mount(argc, argv);
 
 	if (!strcmp(cmd, "--help")) {
 		bcachefs_usage();
@@ -282,7 +280,7 @@ int main(int argc, char *argv[])
 	}
 
 	printf("Unknown command %s\n", cmd);
-	usage:
+usage:
 	bcachefs_usage();
 	exit(EXIT_FAILURE);
 }

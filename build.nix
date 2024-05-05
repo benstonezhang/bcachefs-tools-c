@@ -1,5 +1,5 @@
 { lib, stdenv, pkg-config, attr, libuuid, libsodium, keyutils, liburcu, zlib
-, libaio, udev, zstd, lz4, nix-gitignore, rustPlatform, rustc, cargo, fuse3
+, libaio, udev, zstd, lz4, nix-gitignore, fuse3
 , fuseSupport ? false, }:
 let
   src = nix-gitignore.gitignoreSource [ ] ./.;
@@ -13,10 +13,6 @@ in stdenv.mkDerivation {
 
   nativeBuildInputs = [
     pkg-config
-    cargo
-    rustc
-    rustPlatform.cargoSetupHook
-    rustPlatform.bindgenHook
   ];
 
   buildInputs = [

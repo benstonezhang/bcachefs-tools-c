@@ -27,8 +27,7 @@ scp bcachefs-tools-$version.tar.sign	evilpiepirate.org:/var/www/htdocs/bcachefs-
 
 cp bcachefs-tools-$version.tar bcachefs-tools-vendored-$version.tar
 tar --append --file bcachefs-tools-vendored-$version.tar	\
-    --transform="s_^_bcachefs-tools-$version/_"			\
-    .cargo vendor
+    --transform="s_^_bcachefs-tools-$version/_"
 
 zstd -z --ultra			bcachefs-tools-vendored-$version.tar
 
