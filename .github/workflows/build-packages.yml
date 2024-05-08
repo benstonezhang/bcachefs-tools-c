@@ -41,7 +41,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install build essentials
-        run: dnf install -y nodejs make rpmdevtools yum-utils
+        run: dnf install -y make rpmdevtools yum-utils
       - name: Install build-deps
         run: dnf builddep -y packaging/bcachefs-tools.spec
       - name: Make rpm

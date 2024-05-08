@@ -1,35 +1,19 @@
-#include <ctype.h>
-#include <errno.h>
-#include <fcntl.h>
 #include <getopt.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/mount.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
 
-#include <uuid/uuid.h>
+#include <sys/mount.h>
 #include <blkid/blkid.h>
-#include <linux/mount.h>
 
 #include "cmds.h"
 #include "libbcachefs.h"
-#include "crypto.h"
 #include "tools-util.h"
-#include "libbcachefs/errcode.h"
-#include "libbcachefs/opts.h"
+#include "crypto.h"
 #include "libbcachefs/super-io.h"
 #include "libbcachefs/util.h"
-#include "libbcachefs/darray.h"
 
 typedef enum {
-	policy_fail,
-	policy_wait,
-	policy_ask
+	POLICY_FAIL,
+	POLICY_WAIT,
+	POLICY_ASK,
 } unlock_policy;
 
 typedef struct {
@@ -64,7 +48,7 @@ static void mount_usage(void)
 	     "Usage: bcachefs mount [options] device mountpoint\n"
 	     "\n"
 	     "Options:\n"
-	     "  -o, --options\n"
+	     "  -o, --options=\n"
 	     "      Mount options provided as a comma-separated list. See user guide for complete list.\n"
 	     "           degraded   Allow mounting with data degraded\n"
 	     "           verbose    Extra debugging info during mount/recovery\n"
@@ -72,7 +56,7 @@ static void mount_usage(void)
 	     "           fix_errors Fix errors without asking during fsck\n"
 	     "           read_only  Mount in read only mode\n"
 	     "           version_upgrade\n"
-	     "  -f, --passphrase_file\n"
+	     "  -f, --passphrase_file=\n"
 	     "      Passphrase file to read from (disables passphrase prompt)\n"
 	     "  -k, --key-location=(fail | wait | ask)\n"
 	     "      How the password would be loaded. (default: ask).\n"
@@ -90,7 +74,7 @@ static unsigned int parse_mount_options(const char *_opts, char **mount_options)
 	int i;
 	char *opts, *orig, *s, *remain = NULL;
 
-	opts = orig = xstrdup(_opts);
+	opts = orig = strdup(_opts);
 	*mount_options = xmalloc(strlen(orig) + 1);
 
 	while ((s = strsep(&opts, ","))) {
@@ -107,11 +91,14 @@ static unsigned int parse_mount_options(const char *_opts, char **mount_options)
 				} else {
 					*remain++ = ',';
 				}
-				strcpy(remain, s);
-				remain += strlen(s);
+				int l = strlen(s);
+				memcpy(remain, s, l);
+				remain += l;
+				break;
 			}
 		}
 	}
+	*remain = '\0';
 
 	free(orig);
 	return flag;
@@ -138,10 +125,11 @@ static char * get_name_from_uuid(const char *uuid)
 		const char *type = blkid_get_tag_value (cache, "TYPE", name);
 		if (!strcmp(type, fs_type)) {
 			len += strlen(name) + 1;
-			darray_push(&devs, xstrdup(name));
+			darray_push(&devs, strdup(name));
 		}
 	}
 	blkid_dev_iterate_end(iter);
+	blkid_put_cache(cache);
 
 	if (!len)
 		die("no device found");
@@ -167,7 +155,7 @@ static char * get_name_from_uuid(const char *uuid)
 static void unlock_super(const char *devs_str, const char *passphrase_file, unlock_policy policy)
 {
 	// get the first dev
-	char *dev = xstrdup(devs_str);
+	char *dev = strdup(devs_str);
 	char *sep = strchr(dev, ':');
 	if (sep)
 		*sep = '\0';
@@ -176,6 +164,8 @@ static void unlock_super(const char *devs_str, const char *passphrase_file, unlo
 	struct bch_opts opts = bch2_opts_empty();
 	opt_set(opts, noexcl, true);
 	opt_set(opts, nochanges, true);
+	if (verbose)
+		opt_set(opts, verbose, true);
 
 	struct bch_sb_handle sb;
 	int ret = bch2_read_super(dev, &opts, &sb);
@@ -187,7 +177,7 @@ static void unlock_super(const char *devs_str, const char *passphrase_file, unlo
 		// First by password_file, if available
 		if (passphrase_file)
 			passphrase = read_file_str(AT_FDCWD, passphrase_file);
-		else if (policy == policy_ask)
+		else if (policy == POLICY_ASK)
 			passphrase = read_passphrase("Enter passphrase: ");
 		if (passphrase) {
 			bch2_add_key(sb.sb, "user", "user", passphrase);
@@ -206,7 +196,7 @@ static void unlock_super(const char *devs_str, const char *passphrase_file, unlo
 }
 
 int cmd_mount(int argc, char *argv[]){
-	static const struct option long_opts[]={
+	static const struct option long_opts[] = {
 		{"passphrase_file",	optional_argument,	NULL,	'f'},
 		{"key_location",	required_argument,	NULL,	'k'},
 		{"options",	required_argument,	NULL,	'o'},
@@ -214,7 +204,7 @@ int cmd_mount(int argc, char *argv[]){
 		{NULL}
 	};
 	int opt;
-	unlock_policy policy = policy_ask;
+	unlock_policy policy = POLICY_ASK;
 	unsigned int mount_flags = 0U;
 	const char *passphrase_file = NULL;
 	char *mount_options = NULL;
@@ -223,39 +213,35 @@ int cmd_mount(int argc, char *argv[]){
 
 	while ((opt = getopt_long(argc,argv,"f:k:o:v",long_opts,NULL)) != -1)
 		switch (opt) {
-		case 'f':
-			passphrase_file = optarg;
-			break;
-		case 'k':
-			if (!strcmp(optarg,"fail"))
-				policy = policy_fail;
-			else if (!strcmp_prefix(optarg,"wait"))
-				policy = policy_wait;
-			else if (!strcmp(optarg,"ask"))
-				policy = policy_ask;
-			else {
+			case 'f':
+				passphrase_file = optarg;
+				break;
+			case 'k':
+				if (!strcmp(optarg,"fail"))
+					policy = POLICY_FAIL;
+				else if (!strcmp_prefix(optarg,"wait"))
+					policy = POLICY_WAIT;
+				else if (!strcmp(optarg,"ask"))
+					policy = POLICY_ASK;
+				else {
+					mount_usage();
+					exit(16);
+				}
+				break;
+			case 'o':
+				mount_flags = parse_mount_options(optarg, &mount_options);
+				break;
+			case 'v':
+				verbose = 1;
+				break;
+			default:
 				mount_usage();
 				exit(16);
-			}
-			break;
-		case 'o':
-			mount_flags = parse_mount_options(optarg, &mount_options);
-			break;
-		case 'v':
-			verbose = 1;
-			break;
-		default:
-			mount_usage();
-			exit(16);
 		}
 
 	args_shift(optind);
 
 	if (argc != 2) {
-		printf("argc=%d\n", argc);
-		for (int i=0; i<argc; i++)
-			printf("argv[%d]: %s\n", i, argv[i]);
-		puts("");
 		mount_usage();
 		exit(8);
 	}
@@ -267,7 +253,7 @@ int cmd_mount(int argc, char *argv[]){
 	else if (!strncmp(argv[0], "OLD_BLKID_UUID=", 15))
 		devs_str = get_name_from_uuid(argv[0] + 15);
 	else
-		devs_str = xstrdup(argv[0]);
+		devs_str = strdup(argv[0]);
 
 	unlock_super(devs_str, passphrase_file, policy);
 

@@ -84,7 +84,6 @@ else
 	ROOT_SBINDIR?=$(PREFIX)/sbin
 	INITRAMFS_DIR=/etc/initramfs-tools
 endif
-LIBEXECDIR=$(PREFIX)/libexec
 
 PKGCONFIG_SERVICEDIR:=$(shell $(PKG_CONFIG) --variable=systemdsystemunitdir systemd)
 ifeq (,$(PKGCONFIG_SERVICEDIR))
