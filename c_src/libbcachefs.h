@@ -155,7 +155,7 @@ static inline struct bch_ioctl_fs_usage *bchu_fs_usage(struct bchfs_handle fs)
 	size_t replica_entries_bytes = 4096;
 
 	while (1) {
-		u = xrealloc(u, sizeof(*u) + replica_entries_bytes);
+		u = realloc(u, sizeof(*u) + replica_entries_bytes);
 		u->replica_entries_bytes = replica_entries_bytes;
 
 		if (!ioctl(fs.ioctl_fd, BCH_IOCTL_FS_USAGE, u))
@@ -171,7 +171,7 @@ static inline struct bch_ioctl_fs_usage *bchu_fs_usage(struct bchfs_handle fs)
 static inline struct bch_ioctl_dev_usage_v2 *bchu_dev_usage(struct bchfs_handle fs,
 							    unsigned idx)
 {
-	struct bch_ioctl_dev_usage_v2 *u = xcalloc(sizeof(*u) + sizeof(u->d[0]) * BCH_DATA_NR, 1);
+	struct bch_ioctl_dev_usage_v2 *u = calloc(sizeof(*u) + sizeof(u->d[0]) * BCH_DATA_NR, 1);
 
 	u->dev			= idx;
 	u->flags		= BCH_BY_INDEX;
@@ -200,7 +200,7 @@ static inline struct bch_sb *bchu_read_super(struct bchfs_handle fs, unsigned id
 	struct bch_sb *sb = NULL;
 
 	while (1) {
-		sb = xrealloc(sb, size);
+		sb = realloc(sb, size);
 		struct bch_ioctl_read_super i = {
 			.size	= size,
 			.sb	= (unsigned long) sb,

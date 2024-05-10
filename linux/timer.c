@@ -301,7 +301,7 @@ static int timer_thread(void *arg)
 
 struct task_struct *timer_task;
 
-__attribute__((constructor(103)))
+__attribute__((constructor(104)))
 static void timers_init(void)
 {
 	heap_init(&pending_timers, 64);
@@ -311,7 +311,7 @@ static void timers_init(void)
 	BUG_ON(IS_ERR(timer_task));
 }
 
-__attribute__((destructor(103)))
+__attribute__((destructor(104)))
 static void timers_cleanup(void)
 {
 	get_task_struct(timer_task);

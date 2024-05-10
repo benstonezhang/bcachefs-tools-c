@@ -79,12 +79,12 @@ void qcow2_write_image(int infd, int outfd, ranges *data,
 	struct qcow2_image img = {
 		.fd		= outfd,
 		.block_size	= block_size,
-		.l2_table	= xcalloc(l2_size, sizeof(u64)),
-		.l1_table	= xcalloc(l1_size, sizeof(u64)),
+		.l2_table	= calloc(l2_size, sizeof(u64)),
+		.l1_table	= calloc(l1_size, sizeof(u64)),
 		.l1_index	= -1,
 		.offset		= round_up(sizeof(hdr), block_size),
 	};
-	char *buf = xmalloc(block_size);
+	char *buf = malloc(block_size);
 	u64 src_offset, dst_offset;
 
 	assert(is_power_of_2(block_size));

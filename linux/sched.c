@@ -101,7 +101,7 @@ out:
 	return timeout < 0 ? 0 : timeout;
 }
 
-__attribute__((constructor(101)))
+__attribute__((constructor(102)))
 static void sched_init(void)
 {
 	struct task_struct *p = malloc(sizeof(*p));
@@ -124,7 +124,7 @@ static void sched_init(void)
 #include <sys/types.h>
 int urandom_fd;
 
-__attribute__((constructor(101)))
+__attribute__((constructor(102)))
 static void rand_init(void)
 {
 	urandom_fd = open("/dev/urandom", O_RDONLY);

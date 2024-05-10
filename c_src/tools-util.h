@@ -34,36 +34,6 @@ struct stat xfstatat(int, const char *, int);
 struct stat xfstat(int);
 struct stat xstat(const char *);
 
-static inline void *xmalloc(size_t size)
-{
-	void *p = malloc(size);
-
-	if (!p)
-		die("insufficient memory");
-
-	memset(p, 0, size);
-	return p;
-}
-
-static inline void *xcalloc(size_t count, size_t size)
-{
-	void *p = calloc(count, size);
-
-	if (!p)
-		die("insufficient memory");
-
-	return p;
-}
-
-static inline void *xrealloc(void *p, size_t size)
-{
-	p = realloc(p, size);
-	if (!p)
-		die("insufficient memory");
-
-	return p;
-}
-
 #define xopenat(_dirfd, _path, ...)					\
 ({									\
 	int _fd = openat((_dirfd), (_path), __VA_ARGS__);		\
@@ -152,8 +122,8 @@ static inline void fiemap_iter_init(struct fiemap_iter *iter, int fd)
 {
 	memset(iter, 0, sizeof(*iter));
 
-	iter->f = xmalloc(sizeof(struct fiemap) +
-			  sizeof(struct fiemap_extent) * 1024);
+	iter->f = malloc(sizeof(struct fiemap) +
+			 sizeof(struct fiemap_extent) * 1024);
 
 	iter->f->fm_extent_count	= 1024;
 	iter->f->fm_length	= FIEMAP_MAX_OFFSET;

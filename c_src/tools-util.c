@@ -115,7 +115,7 @@ char *read_file_str(int dirfd, const char *path)
 	int fd = xopenat(dirfd, path, O_RDONLY);
 	ssize_t len = xfstat(fd).st_size;
 
-	char *buf = xmalloc(len + 1);
+	char *buf = malloc(len + 1);
 
 	len = read(fd, buf, len);
 	if (len < 0)

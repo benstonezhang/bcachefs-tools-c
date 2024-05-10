@@ -318,7 +318,7 @@ struct workqueue_struct *system_long_wq;
 struct workqueue_struct *system_unbound_wq;
 struct workqueue_struct *system_freezable_wq;
 
-__attribute__((constructor(102)))
+__attribute__((constructor(103)))
 static void wq_init(void)
 {
 	system_wq = alloc_workqueue("events", 0, 0);
@@ -332,7 +332,7 @@ static void wq_init(void)
 	       !system_unbound_wq || !system_freezable_wq);
 }
 
-__attribute__((destructor(102)))
+__attribute__((destructor(103)))
 static void wq_cleanup(void)
 {
 	destroy_workqueue(system_freezable_wq);

@@ -117,7 +117,7 @@ static int shrinker_thread(void *arg)
 
 struct task_struct *shrinker_task;
 
-__attribute__((constructor(103)))
+__attribute__((constructor(104)))
 static void shrinker_thread_init(void)
 {
 	shrinker_task = kthread_run(shrinker_thread, NULL, "shrinkers");
@@ -129,7 +129,7 @@ static void shrinker_thread_init(void)
  * We seem to be hitting a rare segfault when shutting down the shrinker thread.
  * Disabling this is going to cause some harmless warnings about memory leaks:
  */
-__attribute__((destructor(103)))
+__attribute__((destructor(104)))
 static void shrinker_thread_exit(void)
 {
 	int ret = kthread_stop(shrinker_task);

@@ -75,7 +75,7 @@ static unsigned int parse_mount_options(const char *_opts, char **mount_options)
 	char *opts, *orig, *s, *remain = NULL;
 
 	opts = orig = strdup(_opts);
-	*mount_options = xmalloc(strlen(orig) + 1);
+	*mount_options = malloc(strlen(orig) + 1);
 
 	while ((s = strsep(&opts, ","))) {
 		i = 0;
@@ -134,7 +134,7 @@ static char * get_name_from_uuid(const char *uuid)
 	if (!len)
 		die("no device found");
 
-	dev_name = s = xmalloc(len);
+	dev_name = s = malloc(len);
 	darray_for_each(devs, i) {
 		char *p = *i;
 		strcpy(s, p);

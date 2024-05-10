@@ -415,14 +415,14 @@ struct fops fops_list[] = {
 	}
 };
 
-__attribute__((constructor(102)))
+__attribute__((constructor(103)))
 static void blkdev_init(void)
 {
 	fops = fops_list;
 	fops->init();
 }
 
-__attribute__((destructor(102)))
+__attribute__((destructor(103)))
 static void blkdev_cleanup(void)
 {
 	fops->cleanup();
