@@ -5,7 +5,7 @@ Userspace tools and docs for bcachefs without rust code
 This is a pure C implementation of original bcachefs-tools, intended for some special cases without
 a rust toolchain or binary size is critical.
 
-For now, subcommand `mount` works, `list` is partial work, but `completions` not.
+For now, subcommand `mount` and `list` works, but `completions` not.
 
 Below is the original README.
 

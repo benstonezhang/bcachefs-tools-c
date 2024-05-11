@@ -5,6 +5,7 @@
 #include "tools-util.h"
 #include "libbcachefs/super.h"
 #include "libbcachefs/btree_iter.h"
+#include "libbcachefs/debug.h"
 
 enum list_modes {
 	MODE_KEYS,
@@ -13,11 +14,11 @@ enum list_modes {
 	MODE_NODES_ON_DISK,
 };
 
-static int btree_id;
+static enum btree_id tree_id = BTREE_ID_extents;
 static enum bch_bkey_type bkey_type = KEY_TYPE_MAX;
-static int list_level;
-static struct bpos list_start;
-static struct bpos list_end;
+static int list_level = 0;
+static struct bpos pos_start;
+static struct bpos pos_end;
 static enum list_modes list_mode = MODE_KEYS;
 static bool run_fsck = false;
 static int verbose = 0;
@@ -43,22 +44,20 @@ static int list_keys(struct bch_fs *fs)
 {
 	struct btree_trans *trans = bch2_trans_get(fs);
 	struct btree_iter iter;
-	struct bkey_s_c k;
+	struct printbuf buf;
 
-	bch2_trans_iter_init_outlined(trans, &iter, btree_id, list_start,
+	bch2_trans_iter_init_outlined(trans, &iter, tree_id, pos_start,
 				      BTREE_ITER_PREFETCH | BTREE_ITER_ALL_SNAPSHOTS);
 	while (1) {
-		k = bch2_btree_iter_peek_and_restart_outlined(&iter);
-		if (!k.k || bpos_cmp(k.k->p, list_end) > 0)
+		struct bkey_s_c k = bch2_btree_iter_peek_and_restart_outlined(&iter);
+		if (!k.k || bpos_cmp(k.k->p, pos_end) > 0)
 			break;
-		if ((bkey_type >= KEY_TYPE_MAX) || (k.k->type == bkey_type))
-			printf("u64s=%u, format=%u, type=%u, version=%llu.%llu, "
-			       "size=%u, snapshot=%u, offset=%llu, inode=%llu)\n",
-			       k.k->u64s, k.k->format, k.k->type,
-			       (__u64)(k.k->version.hi),
-			       (__u64)(k.k->version.lo),
-			       k.k->size, k.k->p.snapshot, k.k->p.offset,
-			       k.k->p.inode);
+		if ((bkey_type >= KEY_TYPE_MAX) || (k.k->type == bkey_type)) {
+			buf = PRINTBUF;
+			bch2_bkey_val_to_text(&buf, fs, k);
+			puts(buf.buf);
+			printbuf_exit(&buf);
+		}
 		bch2_btree_iter_advance(&iter);
 	}
 
@@ -70,17 +69,71 @@ static int list_keys(struct bch_fs *fs)
 
 static int list_btree_formats(struct bch_fs *fs)
 {
-	die("not implemented yet");
+	struct btree_trans *trans = bch2_trans_get(fs);
+	struct btree_iter iter;
+	struct btree *b;
+	struct printbuf buf;
+	int ret = 0;
+
+	for_each_btree_node(trans, iter, tree_id, pos_start, BTREE_ITER_PREFETCH, b, ret) {
+		if (bpos_cmp(b->key.k.p, pos_end) > 0)
+			break;
+		buf = PRINTBUF;
+		bch2_btree_node_to_text(&buf, fs, b);
+		puts(buf.buf);
+		printbuf_exit(&buf);
+	}
+
+	bch2_trans_iter_exit(trans, &iter);
+	bch2_trans_put(trans);
+
+	return ret;
 }
 
 static int list_btree_nodes(struct bch_fs *fs)
 {
-	die("not implemented yet");
+	struct btree_trans *trans = bch2_trans_get(fs);
+	struct btree_iter iter;
+	struct btree *b;
+	struct printbuf buf;
+	int ret = 0;
+
+	for_each_btree_node(trans, iter, tree_id, pos_start, BTREE_ITER_PREFETCH, b, ret) {
+		if (bpos_cmp(b->key.k.p, pos_end) > 0)
+			break;
+		buf = PRINTBUF;
+		bch2_bkey_val_to_text(&buf, fs, bkey_i_to_s_c(&b->key));
+		puts(buf.buf);
+		printbuf_exit(&buf);
+	}
+
+	bch2_trans_iter_exit(trans, &iter);
+	bch2_trans_put(trans);
+
+	return ret;
 }
 
 static int list_nodes_ondisk(struct bch_fs *fs)
 {
-	die("not implemented yet");
+	struct btree_trans *trans = bch2_trans_get(fs);
+	struct btree_iter iter;
+	struct btree *b;
+	struct printbuf buf;
+	int ret = 0;
+
+	for_each_btree_node(trans, iter, tree_id, pos_start, BTREE_ITER_PREFETCH, b, ret) {
+		if (bpos_cmp(b->key.k.p, pos_end) > 0)
+			break;
+		buf = PRINTBUF;
+		bch2_btree_node_ondisk_to_text(&buf, fs, b);
+		puts(buf.buf);
+		printbuf_exit(&buf);
+	}
+
+	bch2_trans_iter_exit(trans, &iter);
+	bch2_trans_put(trans);
+
+	return ret;
 }
 
 int cmd_list(int argc, char *argv[])
@@ -98,13 +151,15 @@ int cmd_list(int argc, char *argv[])
 	};
 	int opt, ret = 0;
 
-	list_start = POS_MIN;
-	list_end = SPOS_MAX;
+	pos_start = POS_MIN;
+	pos_end = SPOS_MAX;
 
 	while ((opt = getopt_long(argc, argv, "b:l:s:e:m:fv", long_opts, NULL)) != -1)
 		switch (opt) {
 			case 'b':
-				btree_id = strtol(optarg, NULL, 10);
+				tree_id = strtol(optarg, NULL, 10);
+				if (tree_id < 0 || tree_id >= BTREE_ID_NR)
+					die("invalid btree_id");
 				break;
 			case 't':
 				bkey_type = (enum bch_bkey_type)strtol(optarg, NULL, 10);
