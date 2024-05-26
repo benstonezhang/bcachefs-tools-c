@@ -16,12 +16,12 @@ typedef void *(*libc_call_reallocarray)(void *ptr, size_t nmemb, size_t size);
 typedef int (*libc_call_posix_memalign)(void **memptr, size_t alignment, size_t size);
 typedef void *(*libc_call_aligned_alloc)(size_t alignment, size_t size);
 
-static libc_call_malloc real_malloc;
-static libc_call_calloc real_calloc;
-static libc_call_realloc real_realloc;
-static libc_call_reallocarray real_reallocarray;
-static libc_call_posix_memalign real_posix_memalign;
-static libc_call_aligned_alloc real_aligned_alloc;
+static libc_call_malloc real_malloc = NULL;
+static libc_call_calloc real_calloc = NULL;
+static libc_call_realloc real_realloc = NULL;
+static libc_call_reallocarray real_reallocarray = NULL;
+static libc_call_posix_memalign real_posix_memalign = NULL;
+static libc_call_aligned_alloc real_aligned_alloc = NULL;
 
 __attribute__((constructor(101)))
 void _bcachefs_tools_init(void)

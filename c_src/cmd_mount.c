@@ -45,10 +45,13 @@ static int verbose = 0;
 static void mount_usage(void)
 {
 	puts("bcachefs mount - filesystem mount\n"
-	     "Usage: bcachefs mount [options] device mountpoint\n"
+	     "Usage: bcachefs mount [OPTION] devices mountpoint\n"
 	     "\n"
-	     "Options:\n"
-	     "  -o, --options=\n"
+	     "Options:\n");
+
+	bch2_opts_usage(OPT_MOUNT);
+
+	puts("  -o, --options=\n"
 	     "      Mount options provided as a comma-separated list. See user guide for complete list.\n"
 	     "           degraded   Allow mounting with data degraded\n"
 	     "           verbose    Extra debugging info during mount/recovery\n"

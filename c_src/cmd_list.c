@@ -26,7 +26,7 @@ static int verbose = 0;
 static void list_usage(void)
 {
 	puts("bcachefs list - list filesystem metadata in textual form\n"
-	     "Usage: bcachefs list [options] devices\n"
+	     "Usage: bcachefs list [OPTION] devices\n"
 	     "\n"
 	     "Options:\n"
 	     "  -b, --btree=   Btree to list from [default: extents]\n"
@@ -47,7 +47,7 @@ static int list_keys(struct bch_fs *fs)
 	struct printbuf buf;
 
 	bch2_trans_iter_init_outlined(trans, &iter, tree_id, pos_start,
-				      BTREE_ITER_PREFETCH | BTREE_ITER_ALL_SNAPSHOTS);
+				      BTREE_ITER_prefetch | BTREE_ITER_all_snapshots);
 	while (1) {
 		struct bkey_s_c k = bch2_btree_iter_peek_and_restart_outlined(&iter);
 		if (!k.k || bpos_cmp(k.k->p, pos_end) > 0)
@@ -75,7 +75,7 @@ static int list_btree_formats(struct bch_fs *fs)
 	struct printbuf buf;
 	int ret = 0;
 
-	for_each_btree_node(trans, iter, tree_id, pos_start, BTREE_ITER_PREFETCH, b, ret) {
+	for_each_btree_node(trans, iter, tree_id, pos_start, BTREE_ITER_prefetch, b, ret) {
 		if (bpos_cmp(b->key.k.p, pos_end) > 0)
 			break;
 		buf = PRINTBUF;
@@ -98,7 +98,7 @@ static int list_btree_nodes(struct bch_fs *fs)
 	struct printbuf buf;
 	int ret = 0;
 
-	for_each_btree_node(trans, iter, tree_id, pos_start, BTREE_ITER_PREFETCH, b, ret) {
+	for_each_btree_node(trans, iter, tree_id, pos_start, BTREE_ITER_prefetch, b, ret) {
 		if (bpos_cmp(b->key.k.p, pos_end) > 0)
 			break;
 		buf = PRINTBUF;
@@ -121,7 +121,7 @@ static int list_nodes_ondisk(struct bch_fs *fs)
 	struct printbuf buf;
 	int ret = 0;
 
-	for_each_btree_node(trans, iter, tree_id, pos_start, BTREE_ITER_PREFETCH, b, ret) {
+	for_each_btree_node(trans, iter, tree_id, pos_start, BTREE_ITER_prefetch, b, ret) {
 		if (bpos_cmp(b->key.k.p, pos_end) > 0)
 			break;
 		buf = PRINTBUF;
