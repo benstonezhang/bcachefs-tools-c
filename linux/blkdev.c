@@ -162,7 +162,7 @@ sector_t get_capacity(struct gendisk *disk)
 	return bytes >> 9;
 }
 
-void fput(struct file *file)
+void bdev_fput(struct file *file)
 {
 	struct block_device *bdev = file_bdev(file);
 

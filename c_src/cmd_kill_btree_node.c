@@ -86,10 +86,13 @@ int cmd_kill_btree_node(int argc, char *argv[])
 
 			struct bkey_ptrs_c ptrs = bch2_bkey_ptrs_c(bkey_i_to_s_c(&b->key));
 			bkey_for_each_ptr(ptrs, ptr) {
-				struct bch_dev *ca = bch_dev_bkey_exists(c, ptr->dev);
+				struct bch_dev *ca = bch2_dev_tryget(c, ptr->dev);
+				if (!ca)
+					continue;
 
 				ret = pwrite(ca->disk_sb.bdev->bd_fd, zeroes,
 					     c->opts.block_size, ptr->offset << 9);
+				bch2_dev_put(ca);
 				if (ret != c->opts.block_size) {
 					bch_err(c, "pwrite error: expected %u got %i %s",
 						c->opts.block_size, ret, strerror(errno));

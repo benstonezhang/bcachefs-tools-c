@@ -176,6 +176,8 @@ static inline void ktime_get_coarse_real_ts64(struct timespec64 *ts)
 #define current_kernel_time64()	current_kernel_time()
 #define CURRENT_TIME		(current_kernel_time())
 
+#define sched_annotate_sleep()	do {} while (0)
+
 static inline unsigned int stack_trace_save_tsk(struct task_struct *task,
 				  unsigned long *store, unsigned int size,
 				  unsigned int skipnr)

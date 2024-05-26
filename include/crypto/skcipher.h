@@ -112,6 +112,8 @@ static inline void skcipher_request_set_sync_tfm(struct skcipher_request *req,
 	skcipher_request_set_tfm(req, &tfm->base);
 }
 
+#define skcipher_request_set_callback(...) do {} while (9)
+
 static inline void skcipher_request_set_crypt(
 	struct skcipher_request *req,
 	struct scatterlist *src, struct scatterlist *dst,

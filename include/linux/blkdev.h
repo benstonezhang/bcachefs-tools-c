@@ -73,7 +73,7 @@ static inline struct block_device *file_bdev(struct file *file)
 	return container_of(file->f_inode, struct block_device, __bd_inode);
 }
 
-void fput(struct file *);
+void bdev_fput(struct file *);
 struct file *bdev_file_open_by_path(const char *, blk_mode_t, void *,
 				    const struct blk_holder_ops *);
 int lookup_bdev(const char *path, dev_t *);

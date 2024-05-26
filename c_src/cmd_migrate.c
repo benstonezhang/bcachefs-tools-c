@@ -719,11 +719,19 @@ static int migrate_fs(const char		*fs_path,
 	opt_set(opts, sb,	sb_offset);
 	opt_set(opts, nostart,	true);
 	opt_set(opts, noexcl,	true);
-	opt_set(opts, buckets_nouse, true);
+	opt_set(opts, nostart, true);
 
 	c = bch2_fs_open(path, 1, opts);
 	if (IS_ERR(c))
 		die("Error opening new filesystem: %s", bch2_err_str(PTR_ERR(c)));
+
+	ret = bch2_buckets_nouse_alloc(c);
+	if (ret)
+		die("Error allocating buckets_nouse: %s", bch2_err_str(ret));
+
+	ret = bch2_fs_start(c);
+	if (IS_ERR(c))
+		die("Error starting new filesystem: %s", bch2_err_str(ret));
 
 	mark_unreserved_space(c, extents);
 

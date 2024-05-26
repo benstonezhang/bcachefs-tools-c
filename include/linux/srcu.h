@@ -21,6 +21,11 @@ static inline unsigned long start_poll_synchronize_srcu(struct srcu_struct *ssp)
 	return 0;
 }
 
+static inline unsigned long get_state_synchronize_srcu(struct srcu_struct *ssp)
+{
+	return 0;
+}
+
 static inline void cleanup_srcu_struct(struct srcu_struct *ssp) {}
 
 static inline int init_srcu_struct(struct srcu_struct *ssp)

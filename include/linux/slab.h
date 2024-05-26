@@ -20,6 +20,8 @@
 #define ARCH_KMALLOC_MINALIGN		16
 #define KMALLOC_MAX_SIZE		SIZE_MAX
 
+#define MAX_PAGE_ORDER			10
+
 static inline size_t kmalloc_size_roundup(size_t s)
 {
 	return roundup_pow_of_two(s);
@@ -102,8 +104,8 @@ static inline void *kmalloc_array(size_t n, size_t size, gfp_t flags)
 
 #define kcalloc(n, size, flags)		kmalloc_array(n, size, flags|__GFP_ZERO)
 
-#define kfree(p)			free(p)
-#define kzfree(p)			free(p)
+#define kfree(p)			free((void *) p)
+#define kzfree(p)			free((void *) p)
 
 #define kvmalloc(size, flags)		kmalloc(size, flags)
 #define kvzalloc(size, flags)		kzalloc(size, flags)
