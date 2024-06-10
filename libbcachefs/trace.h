@@ -43,7 +43,7 @@ DECLARE_EVENT_CLASS(fs_str,
 
 	TP_fast_assign(
 		__entry->dev		= c->dev;
-		__assign_str(str, str);
+		__assign_str(str);
 	),
 
 	TP_printk("%d,%d\n%s", MAJOR(__entry->dev), MINOR(__entry->dev), __get_str(str))
@@ -64,7 +64,7 @@ DECLARE_EVENT_CLASS(trans_str,
 		__entry->dev		= trans->c->dev;
 		strscpy(__entry->trans_fn, trans->fn, sizeof(__entry->trans_fn));
 		__entry->caller_ip		= caller_ip;
-		__assign_str(str, str);
+		__assign_str(str);
 	),
 
 	TP_printk("%d,%d %s %pS %s",
@@ -85,7 +85,7 @@ DECLARE_EVENT_CLASS(trans_str_nocaller,
 	TP_fast_assign(
 		__entry->dev		= trans->c->dev;
 		strscpy(__entry->trans_fn, trans->fn, sizeof(__entry->trans_fn));
-		__assign_str(str, str);
+		__assign_str(str);
 	),
 
 	TP_printk("%d,%d %s %s",
@@ -198,6 +198,56 @@ DECLARE_EVENT_CLASS(bio,
 	TP_printk("%d,%d  %s %llu + %u",
 		  MAJOR(__entry->dev), MINOR(__entry->dev), __entry->rwbs,
 		  (unsigned long long)__entry->sector, __entry->nr_sector)
+);
+
+/* fs.c: */
+TRACE_EVENT(bch2_sync_fs,
+	TP_PROTO(struct super_block *sb, int wait),
+
+	TP_ARGS(sb, wait),
+
+	TP_STRUCT__entry(
+		__field(	dev_t,	dev			)
+		__field(	int,	wait			)
+
+	),
+
+	TP_fast_assign(
+		__entry->dev	= sb->s_dev;
+		__entry->wait	= wait;
+	),
+
+	TP_printk("dev %d,%d wait %d",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->wait)
+);
+
+/* fs-io.c: */
+TRACE_EVENT(bch2_fsync,
+	TP_PROTO(struct file *file, int datasync),
+
+	TP_ARGS(file, datasync),
+
+	TP_STRUCT__entry(
+		__field(	dev_t,	dev			)
+		__field(	ino_t,	ino			)
+		__field(	ino_t,	parent			)
+		__field(	int,	datasync		)
+	),
+
+	TP_fast_assign(
+		struct dentry *dentry = file->f_path.dentry;
+
+		__entry->dev		= dentry->d_sb->s_dev;
+		__entry->ino		= d_inode(dentry)->i_ino;
+		__entry->parent		= d_inode(dentry->d_parent)->i_ino;
+		__entry->datasync	= datasync;
+	),
+
+	TP_printk("dev %d,%d ino %lu parent %lu datasync %d ",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  (unsigned long) __entry->ino,
+		  (unsigned long) __entry->parent, __entry->datasync)
 );
 
 /* super-io.c: */

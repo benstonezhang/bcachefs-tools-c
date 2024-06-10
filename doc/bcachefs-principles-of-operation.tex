@@ -388,7 +388,7 @@ limitation being disk space.
 The following subcommands exist for managing subvolumes and snapshots:
 \begin{itemize}
 	\item \texttt{bcachefs subvolume create}: Create a new, empty subvolume
-	\item \texttt{bcachefs subvolume destroy}: Delete an existing subvolume
+	\item \texttt{bcachefs subvolume delete}: Delete an existing subvolume
 		or snapshot
 	\item \texttt{bcachefs subvolume snapshot}: Create a snapshot of an
 		existing subvolume
@@ -464,7 +464,7 @@ The \texttt{-o verbose} enables additional log output during the mount process.
 
 It is possible to run fsck either in userspace with the \texttt{bcachefs fsck}
 subcommand (also available as \texttt{fsck.bcachefs}, or in the kernel while
-mounting by specifying the \texttt{-o fsck} mount option. In either case the
+mounting by specifying the \texttt{-o fsck} mount option). In either case the
 exact same fsck implementation is being run, only the environment is different.
 Running fsck in the kernel at mount time has the advantage of somewhat better
 performance, while running in userspace has the ability to be stopped with
@@ -528,7 +528,7 @@ filesystem:
 \begin{itemize}
 	\item \texttt{bcachefs device add}: Formats and adds a new device to an
 		existing filesystem.
-	\item \texttt{bcachefs device remove}: Permenantly removes a device from
+	\item \texttt{bcachefs device remove}: Permanently removes a device from
 		an existing filesystem.
 	\item \texttt{bcachefs device online}: Connects a device to a running
 		filesystem that was mounted without it (i.e. in degraded mode)
@@ -912,7 +912,7 @@ quantiles for latency/duration in the
 		\end{itemize}
 
 	\item \texttt{btree\_key\_cache} \\
-		Prints infromation on the btree key cache: number of freed keys
+		Prints information on the btree key cache: number of freed keys
 		(which must wait for a sRCU barrier to complete before being
 		freed), number of cached keys, and number of dirty keys.
 
@@ -1036,7 +1036,7 @@ listing btree nodes and contents, but for offline filesystems.
 \subsubsection{bcachefs list\_journal}
 
 This subcommand lists the contents of the journal, which primarily records btree
-updates ordered by when they occured.
+updates ordered by when they occurred.
 
 \subsubsection{bcachefs dump}
 
@@ -1052,7 +1052,7 @@ This section documents bcachefs-specific ioctls:
 
 \begin{description}
 	\item \texttt{BCH\_IOCTL\_QUERY\_UUID} \\
-		Returs the UUID of the filesystem: used to find the sysfs
+		Returns the UUID of the filesystem: used to find the sysfs
 		directory given a path to a mounted filesystem.
 
 	\item \texttt{BCH\_IOCTL\_FS\_USAGE} \\
@@ -1102,7 +1102,7 @@ This section documents bcachefs-specific ioctls:
 	\item \texttt{BCH\_IOCTL\_DISK\_RESIZE\_JOURNAL} \\
 	\item \texttt{BCH\_IOCTL\_DATA} \\
 		Starts a data job, which walks all data and/or metadata in a
-		filesystem performing, performaing some operation on each btree
+		filesystem performing, performing some operations on each btree
 		node and extent. Returns a file descriptor which can be read
 		from to get the current status of the job, and closing the file
 		descriptor (i.e. on process exit stops the data job.

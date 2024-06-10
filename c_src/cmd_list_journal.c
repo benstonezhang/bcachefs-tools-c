@@ -217,6 +217,7 @@ int cmd_list_journal(int argc, char *argv[])
 	d_btree_id	key_filter = { 0 };
 	int opt;
 
+	opt_set(opts, noexcl,		true);
 	opt_set(opts, nochanges,	true);
 	opt_set(opts, norecovery,	true);
 	opt_set(opts, read_only,	true);

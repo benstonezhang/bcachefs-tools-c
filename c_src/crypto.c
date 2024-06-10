@@ -101,7 +101,7 @@ struct bch_key derive_passphrase(struct bch_sb_field_crypt *crypt,
 	return key;
 }
 
-bool bch2_sb_is_encrypted_and_locked(struct bch_sb *sb)
+bool bch2_sb_is_encrypted(struct bch_sb *sb)
 {
 	struct bch_sb_field_crypt *crypt;
 

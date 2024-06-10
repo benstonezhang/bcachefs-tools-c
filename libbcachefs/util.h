@@ -445,11 +445,6 @@ static inline unsigned fract_exp_two(unsigned x, unsigned fract_bits)
 void bch2_bio_map(struct bio *bio, void *base, size_t);
 int bch2_bio_alloc_pages(struct bio *, size_t, gfp_t);
 
-static inline sector_t bdev_sectors(struct block_device *bdev)
-{
-	return bdev->bd_inode->i_size >> 9;
-}
-
 #define closure_bio_submit(bio, cl)					\
 do {									\
 	closure_get(cl);						\
@@ -723,9 +718,7 @@ static inline void percpu_u64_set(u64 __percpu *dst, u64 src)
 
 static inline void acc_u64s(u64 *acc, const u64 *src, unsigned nr)
 {
-	unsigned i;
-
-	for (i = 0; i < nr; i++)
+	for (unsigned i = 0; i < nr; i++)
 		acc[i] += src[i];
 }
 

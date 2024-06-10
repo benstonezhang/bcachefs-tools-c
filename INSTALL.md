@@ -25,6 +25,11 @@ apt install -y pkg-config libaio-dev libblkid-dev libkeyutils-dev \
     python3 python3-docutils libclang-dev debhelper dh-python
 ```
 
+Starting from Debian Trixie and Ubuntu 23.10, you will additionally need:
+```shell
+apt install -y systemd-dev
+```
+
 Fedora: install the "Development tools" group along with:
 ```shell
 dnf install -y libaio-devel libsodium-devel \

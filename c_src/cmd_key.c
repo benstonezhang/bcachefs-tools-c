@@ -66,7 +66,7 @@ int cmd_unlock(int argc, char *argv[])
 	if (ret)
 		die("Error opening %s: %s", dev, bch2_err_str(ret));
 
-	if (!bch2_sb_is_encrypted_and_locked(sb.sb))
+	if (!bch2_sb_is_encrypted(sb.sb))
 		die("%s is not encrypted", dev);
 
 	if (check)

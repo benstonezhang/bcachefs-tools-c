@@ -638,7 +638,7 @@ struct bch_opts bch2_parse_opts(struct bch_opt_strs strs)
 		ret = bch2_opt_parse(NULL,
 				     &bch2_opt_table[i],
 				     strs.by_id[i], &v, &err);
-		if (ret < 0)
+		if (ret < 0 && ret != -BCH_ERR_option_needs_open_fs)
 			die("Invalid option %s", err.buf);
 
 		bch2_opt_set_by_id(&opts, i, v);

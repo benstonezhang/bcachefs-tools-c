@@ -71,4 +71,4 @@ rm -f %{buildroot}/usr/lib/libbcachefs.so
 
 * Tue Jan 07 2020 Michael Adams <unquietwiki@gmail.com> - 2020.01.07-1
 - Initial RPM package definition
-- Makefile needs further work to accomodate RPM macros.
+- Makefile needs further work to accommodate RPM macros.

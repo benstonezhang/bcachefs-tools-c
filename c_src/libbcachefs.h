@@ -168,6 +168,35 @@ static inline struct bch_ioctl_fs_usage *bchu_fs_usage(struct bchfs_handle fs)
 	}
 }
 
+static inline struct bch_ioctl_query_accounting *bchu_fs_accounting(struct bchfs_handle fs,
+								    unsigned typemask)
+{
+	unsigned accounting_u64s = 128;
+	struct bch_ioctl_query_accounting *ret = NULL;
+
+	while (1) {
+		ret = xrealloc(ret, sizeof(*ret) + accounting_u64s * sizeof(u64));
+
+		memset(ret, 0, sizeof(*ret));
+
+		ret->accounting_u64s = accounting_u64s;
+		ret->accounting_types_mask = typemask;
+
+		if (!ioctl(fs.ioctl_fd, BCH_IOCTL_QUERY_ACCOUNTING, ret))
+			return ret;
+
+		if (errno == ENOTTY)
+			return NULL;
+
+		if (errno == ERANGE) {
+			accounting_u64s *= 2;
+			continue;
+		}
+
+		die("BCH_IOCTL_USAGE error: %m");
+	}
+}
+
 static inline struct bch_ioctl_dev_usage_v2 *bchu_dev_usage(struct bchfs_handle fs,
 							    unsigned idx)
 {

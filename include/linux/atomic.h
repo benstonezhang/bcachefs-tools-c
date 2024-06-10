@@ -41,6 +41,17 @@ typedef struct {
 #define cmpxchg_acquire(p, old, new)	uatomic_cmpxchg(p, old, new)
 #define cmpxchg_release(p, old, new)	uatomic_cmpxchg(p, old, new)
 
+#define try_cmpxchg(p, _old, _new)				\
+({								\
+	typeof(*(_old)) _v = cmpxchg(p, *(_old), _new);		\
+	bool _ret = _v == *(_old);				\
+	*(_old) = _v;						\
+	_ret;							\
+})
+
+#define try_cmpxchg_acquire(p, _old, _new)			\
+	try_cmpxchg(p, _old, _new)
+
 #define smp_mb__before_atomic()		cmm_smp_mb__before_uatomic_add()
 #define smp_mb__after_atomic()		cmm_smp_mb__after_uatomic_add()
 #define smp_wmb()			cmm_smp_wmb()
@@ -64,6 +75,11 @@ typedef struct {
 
 #define xchg(p, v)			__atomic_exchange_n(p, v, __ATOMIC_SEQ_CST)
 #define xchg_acquire(p, v)		__atomic_exchange_n(p, v, __ATOMIC_ACQUIRE)
+
+#define try_cmpxchg(p, old, new)				\
+	__atomic_compare_exchange_n((p), __old, new, false,	\
+				    __ATOMIC_SEQ_CST,		\
+				    __ATOMIC_SEQ_CST)
 
 #define cmpxchg(p, old, new)					\
 ({								\
@@ -279,6 +295,11 @@ static inline i_type a_type##_xchg(a_type##_t *v, i_type i)		\
 static inline i_type a_type##_cmpxchg(a_type##_t *v, i_type old, i_type new)\
 {									\
 	return cmpxchg(&v->counter, old, new);				\
+}									\
+									\
+static inline bool a_type##_try_cmpxchg(a_type##_t *v, i_type *old, i_type new)\
+{									\
+	return try_cmpxchg(&v->counter, old, new);			\
 }									\
 									\
 static inline i_type a_type##_cmpxchg_acquire(a_type##_t *v, i_type old, i_type new)\

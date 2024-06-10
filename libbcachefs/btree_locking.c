@@ -215,6 +215,7 @@ static noinline int break_cycle(struct lock_graph *g, struct printbuf *cycle)
 
 	if (unlikely(!best)) {
 		struct printbuf buf = PRINTBUF;
+		buf.atomic++;
 
 		prt_printf(&buf, bch2_fmt(g->g->trans->c, "cycle of nofail locks"));
 
@@ -792,6 +793,7 @@ static inline int __bch2_trans_relock(struct btree_trans *trans, bool trace)
 	}
 
 	trans->locked = true;
+	trans->last_unlock_ip = 0;
 out:
 	bch2_trans_verify_locks(trans);
 	return 0;

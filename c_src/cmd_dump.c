@@ -36,8 +36,7 @@ static void dump_node(struct bch_fs *c, struct bch_dev *ca, struct bkey_s_c k, r
 
 	bkey_for_each_ptr(ptrs, ptr)
 		if (ptr->dev == ca->dev_idx)
-			range_add(data, ptr->offset << 9,
-				  (btree_ptr_sectors_written(k) << 9) ?: c->opts.btree_node_size);
+			range_add(data, ptr->offset << 9, c->opts.btree_node_size);
 }
 
 static void dump_one_device(struct bch_fs *c, struct bch_dev *ca, int fd,
@@ -94,7 +93,8 @@ static void dump_one_device(struct bch_fs *c, struct bch_dev *ca, int fd,
 		bch2_trans_put(trans);
 	}
 
-	qcow2_write_image(ca->disk_sb.bdev->bd_fd, fd, &data, block_bytes(c));
+	qcow2_write_image(ca->disk_sb.bdev->bd_fd, fd, &data,
+			  max_t(unsigned, c->opts.btree_node_size / 8, block_bytes(c)));
 	darray_exit(&data);
 }
 
@@ -153,7 +153,7 @@ int cmd_dump(int argc, char *argv[])
 	if (IS_ERR(c))
 		die("error opening devices: %s", bch2_err_str(PTR_ERR(c)));
 
-	down_read(&c->gc_lock);
+	down_read(&c->state_lock);
 
 	for_each_online_member(c, ca)
 		nr_devices++;
@@ -176,7 +176,7 @@ int cmd_dump(int argc, char *argv[])
 		close(fd);
 	}
 
-	up_read(&c->gc_lock);
+	up_read(&c->state_lock);
 
 	bch2_fs_stop(c);
 	return 0;

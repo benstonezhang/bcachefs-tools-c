@@ -227,11 +227,16 @@ int cmd_fsck(int argc, char *argv[])
 
 	darray_str devs = get_or_split_cmdline_devs(argc, argv);
 
+	darray_for_each(devs, i)
+		if (dev_mounted(*i))
+			return fsck_online(*i);
+
 	int kernel_probed = kernel;
 	if (kernel_probed < 0)
 		kernel_probed = should_use_kernel_fsck(devs);
 
 	struct bch_opts opts = bch2_opts_empty();
+	struct printbuf parse_later = PRINTBUF;
 
 	if (kernel_probed) {
 		struct bch_ioctl_fsck_offline *fsck = calloc(sizeof(*fsck) +
@@ -255,13 +260,9 @@ int cmd_fsck(int argc, char *argv[])
 		ret = splice_fd_to_stdinout(fsck_fd);
 	} else {
 userland_fsck:
-		ret = bch2_parse_mount_opts(NULL, &opts, opts_str.buf);
+		ret = bch2_parse_mount_opts(NULL, &opts, &parse_later, opts_str.buf);
 		if (ret)
 			return ret;
-
-		darray_for_each(devs, i)
-			if (dev_mounted(*i))
-				return fsck_online(*i);
 
 		struct bch_fs *c = bch2_fs_open(devs.data, devs.nr, opts);
 		if (IS_ERR(c))

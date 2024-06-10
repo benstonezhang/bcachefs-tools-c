@@ -126,7 +126,7 @@ static void update_inode(struct bch_fs *c,
 	bch2_inode_pack(&packed, inode);
 	packed.inode.k.p.snapshot = U32_MAX;
 	ret = bch2_btree_insert(c, BTREE_ID_inodes, &packed.inode.k_i,
-				NULL, 0);
+				NULL, 0, 0);
 	if (ret)
 		die("error updating inode: %s", bch2_err_str(ret));
 }
@@ -340,7 +340,7 @@ static void link_data(struct bch_fs *c, struct bch_inode_unpacked *dst,
 			die("error reserving space in new filesystem: %s",
 			    bch2_err_str(ret));
 
-		ret = bch2_btree_insert(c, BTREE_ID_extents, &e->k_i, &res, 0);
+		ret = bch2_btree_insert(c, BTREE_ID_extents, &e->k_i, &res, 0, 0);
 		if (ret)
 			die("btree insert error %s", bch2_err_str(ret));
 
@@ -762,7 +762,7 @@ static int migrate_fs(const char		*fs_path,
 	       "superblock at the default offset and finish the migration run\n"
 	       "  bcachefs migrate-superblock -d %s -o %llu\n"
 	       "\n"
-	       "The new filesystem will have a file at /old_migrated_filestem\n"
+	       "The new filesystem will have a file at /old_migrated_filesystem\n"
 	       "referencing all disk space that might be used by the existing\n"
 	       "filesystem. That file can be deleted once the old filesystem is\n"
 	       "no longer needed (and should be deleted prior to running\n"
