@@ -177,7 +177,7 @@ static inline struct bch_ioctl_query_accounting *bchu_fs_accounting(struct bchfs
 	struct bch_ioctl_query_accounting *ret = NULL;
 
 	while (1) {
-		ret = xrealloc(ret, sizeof(*ret) + accounting_u64s * sizeof(u64));
+		ret = realloc(ret, sizeof(*ret) + accounting_u64s * sizeof(u64));
 
 		memset(ret, 0, sizeof(*ret));
 

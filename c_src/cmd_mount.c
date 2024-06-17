@@ -175,7 +175,7 @@ static void unlock_super(const char *devs_str, const char *passphrase_file, unlo
 	if (ret)
 		die("Error opening %s: %s", dev, bch2_err_str(ret));
 
-	if (bch2_sb_is_encrypted_and_locked(sb.sb)) {
+	if (bch2_sb_is_encrypted(sb.sb)) {
 		char *passphrase = NULL;
 		// First by password_file, if available
 		if (passphrase_file)
