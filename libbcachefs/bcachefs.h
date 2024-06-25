@@ -533,8 +533,8 @@ struct bch_dev {
 	/*
 	 * Buckets:
 	 * Per-bucket arrays are protected by c->mark_lock, bucket_lock and
-	 * gc_gens_lock, for device resize - holding any is sufficient for
-	 * access: Or rcu_read_lock(), but only for dev_ptr_stale():
+	 * gc_lock, for device resize - holding any is sufficient for access:
+	 * Or rcu_read_lock(), but only for dev_ptr_stale():
 	 */
 	struct bucket_array __rcu *buckets_gc;
 	struct bucket_gens __rcu *bucket_gens;
@@ -731,7 +731,7 @@ struct bch_fs {
 
 	struct bch_dev __rcu	*devs[BCH_SB_MEMBERS_MAX];
 
-	struct bch_accounting_mem accounting[2];
+	struct bch_accounting_mem accounting;
 
 	struct bch_replicas_cpu replicas;
 	struct bch_replicas_cpu replicas_gc;
@@ -790,7 +790,8 @@ struct bch_fs {
 
 	/* BTREE CACHE */
 	struct bio_set		btree_bio;
-	struct workqueue_struct	*io_complete_wq;
+	struct workqueue_struct	*btree_read_complete_wq;
+	struct workqueue_struct	*btree_write_submit_wq;
 
 	struct btree_root	btree_roots_known[BTREE_ID_NR];
 	DARRAY(struct btree_root) btree_roots_extra;
@@ -937,6 +938,7 @@ struct bch_fs {
 	 * The allocation code needs gc_mark in struct bucket to be correct, but
 	 * it's not while a gc is in progress.
 	 */
+	struct rw_semaphore	gc_lock;
 	struct mutex		gc_gens_lock;
 
 	/* IO PATH */
@@ -1204,6 +1206,11 @@ static inline s64 bch2_current_time(const struct bch_fs *c)
 
 	ktime_get_coarse_real_ts64(&now);
 	return timespec_to_bch2_time(c, now);
+}
+
+static inline u64 bch2_current_io_time(const struct bch_fs *c, int rw)
+{
+	return max(1ULL, (u64) atomic64_read(&c->io_clock[rw].now) & LRU_TIME_MAX);
 }
 
 static inline struct stdio_redirect *bch2_fs_stdio_redirect(struct bch_fs *c)
