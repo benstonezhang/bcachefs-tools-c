@@ -569,7 +569,7 @@ static int bch2_trigger_pointer(struct btree_trans *trans,
 	*sectors = insert ? bp.bucket_len : -((s64) bp.bucket_len);
 
 	if (flags & BTREE_TRIGGER_transactional) {
-		struct bkey_i_alloc_v4 *a = bch2_trans_start_alloc_update(trans, bucket);
+		struct bkey_i_alloc_v4 *a = bch2_trans_start_alloc_update(trans, bucket, 0);
 		ret = PTR_ERR_OR_ZERO(a) ?:
 			__mark_pointer(trans, ca, k, &p, *sectors, bp.data_type, &a->v);
 		if (ret)
@@ -1217,7 +1217,6 @@ int bch2_dev_buckets_resize(struct bch_fs *c, struct bch_dev *ca, u64 nbuckets)
 		bucket_gens->nbuckets - bucket_gens->first_bucket;
 
 	if (resize) {
-		down_write(&c->gc_lock);
 		down_write(&ca->bucket_lock);
 		percpu_down_write(&c->mark_lock);
 	}
@@ -1240,7 +1239,6 @@ int bch2_dev_buckets_resize(struct bch_fs *c, struct bch_dev *ca, u64 nbuckets)
 	if (resize) {
 		percpu_up_write(&c->mark_lock);
 		up_write(&ca->bucket_lock);
-		up_write(&c->gc_lock);
 	}
 
 	ret = 0;

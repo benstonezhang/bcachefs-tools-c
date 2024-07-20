@@ -722,13 +722,16 @@ static void journal_entry_dev_usage_to_text(struct printbuf *out, struct bch_fs 
 
 	prt_printf(out, "dev=%u", le32_to_cpu(u->dev));
 
+	printbuf_indent_add(out, 2);
 	for (i = 0; i < nr_types; i++) {
+		prt_newline(out);
 		bch2_prt_data_type(out, i);
 		prt_printf(out, ": buckets=%llu sectors=%llu fragmented=%llu",
 		       le64_to_cpu(u->d[i].buckets),
 		       le64_to_cpu(u->d[i].sectors),
 		       le64_to_cpu(u->d[i].fragmented));
 	}
+	printbuf_indent_sub(out, 2);
 }
 
 static int journal_entry_log_validate(struct bch_fs *c,
@@ -1678,6 +1681,13 @@ static CLOSURE_CALLBACK(journal_write_done)
 		mod_delayed_work(j->wq, &j->write_work, max(0L, delta));
 	}
 
+	/*
+	 * We don't typically trigger journal writes from her - the next journal
+	 * write will be triggered immediately after the previous one is
+	 * allocated, in bch2_journal_write() - but the journal write error path
+	 * is special:
+	 */
+	bch2_journal_do_writes(j);
 	spin_unlock(&j->lock);
 }
 
@@ -1974,7 +1984,6 @@ CLOSURE_CALLBACK(bch2_journal_write)
 	struct journal *j = container_of(w, struct journal, buf[w->idx]);
 	struct bch_fs *c = container_of(j, struct bch_fs, journal);
 	struct bch_replicas_padded replicas;
-	struct printbuf journal_debug_buf = PRINTBUF;
 	unsigned nr_rw_members = 0;
 	int ret;
 
@@ -2018,11 +2027,16 @@ CLOSURE_CALLBACK(bch2_journal_write)
 	}
 
 	if (ret) {
-		__bch2_journal_debug_to_text(&journal_debug_buf, j);
+		struct printbuf buf = PRINTBUF;
+		buf.atomic++;
+
+		prt_printf(&buf, bch2_fmt(c, "Unable to allocate journal write at seq %llu: %s"),
+					  le64_to_cpu(w->data->seq),
+					  bch2_err_str(ret));
+		__bch2_journal_debug_to_text(&buf, j);
 		spin_unlock(&j->lock);
-		bch_err(c, "Unable to allocate journal write:\n%s",
-			journal_debug_buf.buf);
-		printbuf_exit(&journal_debug_buf);
+		bch2_print_string_as_lines(KERN_ERR, buf.buf);
+		printbuf_exit(&buf);
 		goto err;
 	}
 

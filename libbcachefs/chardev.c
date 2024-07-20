@@ -214,22 +214,10 @@ static long bch2_ioctl_fsck_offline(struct bch_ioctl_fsck_offline __user *user_a
 
 	if (arg.opts) {
 		char *optstr = strndup_user((char __user *)(unsigned long) arg.opts, 1 << 16);
-		char *ro, *rest;
-
-		/*
-		 * If passed a "read_only" mount option, remove it because it is
-		 * no longer a valid mount option, and the filesystem will be
-		 * set "read_only" regardless.
-		 */
-		ro = strstr(optstr, "read_only");
-		if (ro) {
-			rest = ro + strlen("read_only");
-			memmove(ro, rest, strlen(rest) + 1);
-		}
-
 		ret =   PTR_ERR_OR_ZERO(optstr) ?:
 			bch2_parse_mount_opts(NULL, &thr->opts, NULL, optstr);
-		kfree(optstr);
+		if (!IS_ERR(optstr))
+			kfree(optstr);
 
 		if (ret)
 			goto err;
@@ -333,7 +321,8 @@ static long bch2_ioctl_disk_add(struct bch_fs *c, struct bch_ioctl_disk arg)
 		return ret;
 
 	ret = bch2_dev_add(c, path);
-	kfree(path);
+	if (!IS_ERR(path))
+		kfree(path);
 
 	return ret;
 }
@@ -579,7 +568,6 @@ static long bch2_ioctl_query_accounting(struct bch_fs *c,
 
 	ret = copy_to_user_errcode(user_arg, &arg, sizeof(arg));
 err:
-	bch_err_fn(c, ret);
 	darray_exit(&accounting);
 	return ret;
 }
@@ -861,7 +849,8 @@ static long bch2_ioctl_fsck_online(struct bch_fs *c,
 
 		ret =   PTR_ERR_OR_ZERO(optstr) ?:
 			bch2_parse_mount_opts(c, &thr->opts, NULL, optstr);
-		kfree(optstr);
+		if (!IS_ERR(optstr))
+			kfree(optstr);
 
 		if (ret)
 			goto err;

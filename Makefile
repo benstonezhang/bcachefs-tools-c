@@ -157,7 +157,7 @@ bcachefs: $(BCACHEFS_DEPS)
 
 libbcachefs.a: $(filter-out ./tests/%.o, $(OBJS))
 	@echo "    [AR]     $@"
-	$(Q)ar -rc $@ $+
+	$(Q)$(AR) -rc $@ $+
 
 tests/test_helper: $(filter ./tests/%.o, $(OBJS))
 	@echo "    [LD]     $@"
