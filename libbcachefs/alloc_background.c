@@ -260,6 +260,14 @@ int bch2_alloc_v4_invalid(struct bch_fs *c, struct bkey_s_c k,
 			 "invalid data type (got %u should be %u)",
 			 a.v->data_type, alloc_data_type(*a.v, a.v->data_type));
 
+	for (unsigned i = 0; i < 2; i++)
+		bkey_fsck_err_on(a.v->io_time[i] > LRU_TIME_MAX,
+				 c, err,
+				 alloc_key_io_time_bad,
+				 "invalid io_time[%s]: %llu, max %llu",
+				 i == READ ? "read" : "write",
+				 a.v->io_time[i], LRU_TIME_MAX);
+
 	unsigned stripe_sectors = BCH_ALLOC_V4_BACKPOINTERS_START(a.v) * sizeof(u64) >
 		offsetof(struct bch_alloc_v4, stripe_sectors)
 		? a.v->stripe_sectors
@@ -587,6 +595,8 @@ int bch2_alloc_read(struct bch_fs *c)
 	struct bch_dev *ca = NULL;
 	int ret;
 
+	down_read(&c->gc_lock);
+
 	if (c->sb.version_upgrade_complete >= bcachefs_metadata_version_bucket_gens) {
 		ret = for_each_btree_key(trans, iter, BTREE_ID_bucket_gens, POS_MIN,
 					 BTREE_ITER_prefetch, k, ({
@@ -635,6 +645,7 @@ int bch2_alloc_read(struct bch_fs *c)
 
 	bch2_dev_put(ca);
 	bch2_trans_put(trans);
+	up_read(&c->gc_lock);
 
 	bch_err_fn(c, ret);
 	return ret;
@@ -810,6 +821,7 @@ int bch2_trigger_alloc(struct btree_trans *trans,
 		       enum btree_iter_update_trigger_flags flags)
 {
 	struct bch_fs *c = trans->c;
+	struct printbuf buf = PRINTBUF;
 	int ret = 0;
 
 	struct bch_dev *ca = bch2_dev_bucket_tryget(c, new.k->p);
@@ -824,8 +836,8 @@ int bch2_trigger_alloc(struct btree_trans *trans,
 		alloc_data_type_set(new_a, new_a->data_type);
 
 		if (bch2_bucket_sectors_total(*new_a) > bch2_bucket_sectors_total(*old_a)) {
-			new_a->io_time[READ] = max_t(u64, 1, atomic64_read(&c->io_clock[READ].now));
-			new_a->io_time[WRITE]= max_t(u64, 1, atomic64_read(&c->io_clock[WRITE].now));
+			new_a->io_time[READ] = bch2_current_io_time(c, READ);
+			new_a->io_time[WRITE]= bch2_current_io_time(c, WRITE);
 			SET_BCH_ALLOC_V4_NEED_INC_GEN(new_a, true);
 			SET_BCH_ALLOC_V4_NEED_DISCARD(new_a, true);
 		}
@@ -848,7 +860,7 @@ int bch2_trigger_alloc(struct btree_trans *trans,
 
 		if (new_a->data_type == BCH_DATA_cached &&
 		    !new_a->io_time[READ])
-			new_a->io_time[READ] = max_t(u64, 1, atomic64_read(&c->io_clock[READ].now));
+			new_a->io_time[READ] = bch2_current_io_time(c, READ);
 
 		u64 old_lru = alloc_lru_idx_read(*old_a);
 		u64 new_lru = alloc_lru_idx_read(*new_a);
@@ -925,9 +937,14 @@ int bch2_trigger_alloc(struct btree_trans *trans,
 		}
 
 		if (new_a->gen != old_a->gen) {
-			percpu_down_read(&c->mark_lock);
-			*bucket_gen(ca, new.k->p.offset) = new_a->gen;
-			percpu_up_read(&c->mark_lock);
+			rcu_read_lock();
+			u8 *gen = bucket_gen(ca, new.k->p.offset);
+			if (unlikely(!gen)) {
+				rcu_read_unlock();
+				goto invalid_bucket;
+			}
+			*gen = new_a->gen;
+			rcu_read_unlock();
 		}
 
 #define eval_state(_a, expr)		({ const struct bch_alloc_v4 *a = _a; expr; })
@@ -939,7 +956,7 @@ int bch2_trigger_alloc(struct btree_trans *trans,
 			closure_wake_up(&c->freelist_wait);
 
 		if (statechange(a->data_type == BCH_DATA_need_discard) &&
-		    !bch2_bucket_is_open(c, new.k->p.inode, new.k->p.offset) &&
+		    !bch2_bucket_is_open_safe(c, new.k->p.inode, new.k->p.offset) &&
 		    bucket_flushed(new_a))
 			bch2_discard_one_bucket_fast(c, new.k->p);
 
@@ -955,13 +972,23 @@ int bch2_trigger_alloc(struct btree_trans *trans,
 	if ((flags & BTREE_TRIGGER_gc) && (flags & BTREE_TRIGGER_insert)) {
 		rcu_read_lock();
 		struct bucket *g = gc_bucket(ca, new.k->p.offset);
+		if (unlikely(!g)) {
+			rcu_read_unlock();
+			goto invalid_bucket;
+		}
 		g->gen_valid	= 1;
 		g->gen		= new_a->gen;
 		rcu_read_unlock();
 	}
 err:
+	printbuf_exit(&buf);
 	bch2_dev_put(ca);
 	return ret;
+invalid_bucket:
+	bch2_fs_inconsistent(c, "reference to invalid bucket\n  %s",
+			     (bch2_bkey_val_to_text(&buf, c, new.s_c), buf.buf));
+	ret = -EIO;
+	goto err;
 }
 
 /*
@@ -1609,7 +1636,7 @@ static int bch2_check_alloc_to_lru_ref(struct btree_trans *trans,
 		if (ret)
 			goto err;
 
-		a_mut->v.io_time[READ] = atomic64_read(&c->io_clock[READ].now);
+		a_mut->v.io_time[READ] = bch2_current_io_time(c, READ);
 		ret = bch2_trans_update(trans, alloc_iter,
 					&a_mut->k_i, BTREE_TRIGGER_norun);
 		if (ret)
@@ -2006,8 +2033,8 @@ static int invalidate_one_bucket(struct btree_trans *trans,
 	a->v.dirty_sectors	= 0;
 	a->v.stripe_sectors	= 0;
 	a->v.cached_sectors	= 0;
-	a->v.io_time[READ]	= atomic64_read(&c->io_clock[READ].now);
-	a->v.io_time[WRITE]	= atomic64_read(&c->io_clock[WRITE].now);
+	a->v.io_time[READ]	= bch2_current_io_time(c, READ);
+	a->v.io_time[WRITE]	= bch2_current_io_time(c, WRITE);
 
 	ret = bch2_trans_commit(trans, NULL, NULL,
 				BCH_WATERMARK_btree|
@@ -2042,6 +2069,21 @@ err:
 	goto out;
 }
 
+static struct bkey_s_c next_lru_key(struct btree_trans *trans, struct btree_iter *iter,
+				    struct bch_dev *ca, bool *wrapped)
+{
+	struct bkey_s_c k;
+again:
+	k = bch2_btree_iter_peek_upto(iter, lru_pos(ca->dev_idx, U64_MAX, LRU_TIME_MAX));
+	if (!k.k && !*wrapped) {
+		bch2_btree_iter_set_pos(iter, lru_pos(ca->dev_idx, 0, 0));
+		*wrapped = true;
+		goto again;
+	}
+
+	return k;
+}
+
 static void bch2_do_invalidates_work(struct work_struct *work)
 {
 	struct bch_fs *c = container_of(work, struct bch_fs, invalidate_work);
@@ -2055,12 +2097,31 @@ static void bch2_do_invalidates_work(struct work_struct *work)
 	for_each_member_device(c, ca) {
 		s64 nr_to_invalidate =
 			should_invalidate_buckets(ca, bch2_dev_usage_read(ca));
+		struct btree_iter iter;
+		bool wrapped = false;
 
-		ret = for_each_btree_key_upto(trans, iter, BTREE_ID_lru,
-				lru_pos(ca->dev_idx, 0, 0),
-				lru_pos(ca->dev_idx, U64_MAX, LRU_TIME_MAX),
-				BTREE_ITER_intent, k,
-			invalidate_one_bucket(trans, &iter, k, &nr_to_invalidate));
+		bch2_trans_iter_init(trans, &iter, BTREE_ID_lru,
+				     lru_pos(ca->dev_idx, 0,
+					     ((bch2_current_io_time(c, READ) + U32_MAX) &
+					      LRU_TIME_MAX)), 0);
+
+		while (true) {
+			bch2_trans_begin(trans);
+
+			struct bkey_s_c k = next_lru_key(trans, &iter, ca, &wrapped);
+			ret = bkey_err(k);
+			if (bch2_err_matches(ret, BCH_ERR_transaction_restart))
+				continue;
+			if (ret)
+				break;
+			if (!k.k)
+				break;
+
+			ret = invalidate_one_bucket(trans, &iter, k, &nr_to_invalidate);
+			if (ret)
+				break;
+		}
+		bch2_trans_iter_exit(trans, &iter);
 
 		if (ret < 0) {
 			bch2_dev_put(ca);
@@ -2235,7 +2296,7 @@ int bch2_bucket_io_time_reset(struct btree_trans *trans, unsigned dev,
 	if (ret)
 		return ret;
 
-	now = atomic64_read(&c->io_clock[rw].now);
+	now = bch2_current_io_time(c, rw);
 	if (a->v.io_time[rw] == now)
 		goto out;
 

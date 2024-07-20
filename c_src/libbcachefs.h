@@ -4,6 +4,7 @@
 #include <linux/uuid.h>
 #include <stdbool.h>
 
+#include "libbcachefs/bcachefs.h"
 #include "libbcachefs/bcachefs_format.h"
 #include "libbcachefs/bcachefs_ioctl.h"
 #include "libbcachefs/inode.h"
