@@ -17,6 +17,7 @@
 #include "btree_iter.h"
 #include "btree_key_cache.h"
 #include "btree_update.h"
+#include "btree_update_interior.h"
 #include "btree_gc.h"
 #include "buckets.h"
 #include "clock.h"
@@ -141,8 +142,10 @@ write_attribute(trigger_gc);
 write_attribute(trigger_discards);
 write_attribute(trigger_invalidates);
 write_attribute(trigger_journal_flush);
+write_attribute(trigger_journal_writes);
 write_attribute(trigger_btree_cache_shrink);
 write_attribute(trigger_btree_key_cache_shrink);
+write_attribute(trigger_freelist_wakeup);
 rw_attribute(gc_gens_pos);
 
 read_attribute(uuid);
@@ -169,6 +172,7 @@ read_attribute(compression_stats);
 read_attribute(journal_debug);
 read_attribute(btree_cache);
 read_attribute(btree_key_cache);
+read_attribute(btree_reserve_cache);
 read_attribute(stripes_heap);
 read_attribute(open_buckets);
 read_attribute(open_buckets_partial);
@@ -356,6 +360,9 @@ SHOW(bch2_fs)
 	if (attr == &sysfs_btree_key_cache)
 		bch2_btree_key_cache_to_text(out, &c->btree_key_cache);
 
+	if (attr == &sysfs_btree_reserve_cache)
+		bch2_btree_reserve_cache_to_text(out, c);
+
 	if (attr == &sysfs_stripes_heap)
 		bch2_stripes_heap_to_text(out, c);
 
@@ -471,6 +478,12 @@ STORE(bch2_fs)
 		bch2_journal_meta(&c->journal);
 	}
 
+	if (attr == &sysfs_trigger_journal_writes)
+		bch2_journal_do_writes(&c->journal);
+
+	if (attr == &sysfs_trigger_freelist_wakeup)
+		closure_wake_up(&c->freelist_wait);
+
 #ifdef CONFIG_BCACHEFS_TESTS
 	if (attr == &sysfs_perf_test) {
 		char *tmp = kstrdup(buf, GFP_KERNEL), *p = tmp;
@@ -573,6 +586,7 @@ struct attribute *bch2_fs_internal_files[] = {
 	&sysfs_journal_debug,
 	&sysfs_btree_cache,
 	&sysfs_btree_key_cache,
+	&sysfs_btree_reserve_cache,
 	&sysfs_new_stripes,
 	&sysfs_stripes_heap,
 	&sysfs_open_buckets,
@@ -589,8 +603,10 @@ struct attribute *bch2_fs_internal_files[] = {
 	&sysfs_trigger_discards,
 	&sysfs_trigger_invalidates,
 	&sysfs_trigger_journal_flush,
+	&sysfs_trigger_journal_writes,
 	&sysfs_trigger_btree_cache_shrink,
 	&sysfs_trigger_btree_key_cache_shrink,
+	&sysfs_trigger_freelist_wakeup,
 
 	&sysfs_gc_gens_pos,
 

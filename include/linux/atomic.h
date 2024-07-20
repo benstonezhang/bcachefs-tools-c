@@ -344,6 +344,7 @@ void atomic64_sub(s64, atomic64_t *);
 
 s64 atomic64_xchg(atomic64_t *, s64);
 s64 atomic64_cmpxchg(atomic64_t *, s64, s64);
+bool atomic64_try_cmpxchg(atomic64_t *, s64 *, s64);
 
 #define atomic64_add_negative(a, v)	(atomic64_add_return((a), (v)) < 0)
 #define atomic64_inc(v)			atomic64_add(1LL, (v))

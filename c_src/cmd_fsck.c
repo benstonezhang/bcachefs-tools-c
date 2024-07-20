@@ -228,8 +228,10 @@ int cmd_fsck(int argc, char *argv[])
 	darray_str devs = get_or_split_cmdline_devs(argc, argv);
 
 	darray_for_each(devs, i)
-		if (dev_mounted(*i))
+		if (dev_mounted(*i)) {
+			printf("Running fsck online\n");
 			return fsck_online(*i);
+		}
 
 	int kernel_probed = kernel;
 	if (kernel_probed < 0)
@@ -239,6 +241,7 @@ int cmd_fsck(int argc, char *argv[])
 	struct printbuf parse_later = PRINTBUF;
 
 	if (kernel_probed) {
+		printf("Running in-kernel offline fsck\n");
 		struct bch_ioctl_fsck_offline *fsck = calloc(sizeof(*fsck) +
 							     sizeof(u64) * devs.nr, 1);
 
@@ -260,6 +263,7 @@ int cmd_fsck(int argc, char *argv[])
 		ret = splice_fd_to_stdinout(fsck_fd);
 	} else {
 userland_fsck:
+		printf("Running userspace offline fsck\n");
 		ret = bch2_parse_mount_opts(NULL, &opts, &parse_later, opts_str.buf);
 		if (ret)
 			return ret;

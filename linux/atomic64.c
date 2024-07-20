@@ -157,6 +157,21 @@ long long atomic64_cmpxchg(atomic64_t *v, long long o, long long n)
 	return val;
 }
 
+bool atomic64_try_cmpxchg(atomic64_t *v, s64 *o, s64 n)
+{
+	unsigned long flags;
+	raw_spinlock_t *lock = lock_addr(v);
+
+	raw_spin_lock_irqsave(lock, flags);
+	bool ret = v->counter == *o;
+	if (ret)
+		v->counter = n;
+	else
+		*o = v->counter;
+	raw_spin_unlock_irqrestore(lock, flags);
+	return ret;
+}
+
 long long atomic64_xchg(atomic64_t *v, long long new)
 {
 	unsigned long flags;
