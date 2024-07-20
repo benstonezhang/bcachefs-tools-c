@@ -233,7 +233,8 @@ static struct inode *bch2_alloc_inode(struct super_block *sb)
 
 static struct bch_inode_info *__bch2_new_inode(struct bch_fs *c)
 {
-	struct bch_inode_info *inode = kmem_cache_alloc(bch2_inode_cache, GFP_NOFS);
+	struct bch_inode_info *inode = alloc_inode_sb(c->vfs_sb,
+						bch2_inode_cache, GFP_NOFS);
 	if (!inode)
 		return NULL;
 
@@ -2140,7 +2141,8 @@ int __init bch2_vfs_init(void)
 {
 	int ret = -ENOMEM;
 
-	bch2_inode_cache = KMEM_CACHE(bch_inode_info, SLAB_RECLAIM_ACCOUNT);
+	bch2_inode_cache = KMEM_CACHE(bch_inode_info, SLAB_RECLAIM_ACCOUNT |
+				      SLAB_ACCOUNT);
 	if (!bch2_inode_cache)
 		goto err;
 

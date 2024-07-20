@@ -818,7 +818,6 @@ STORE(bch2_dev)
 {
 	struct bch_dev *ca = container_of(kobj, struct bch_dev, kobj);
 	struct bch_fs *c = ca->fs;
-	struct bch_member *mi;
 
 	if (attr == &sysfs_discard) {
 		bool v = strtoul_or_return(buf);

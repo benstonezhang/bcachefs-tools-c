@@ -662,14 +662,8 @@ alloc:
 		goto alloc;
 	}
 err:
-	if (!ob) {
-		rcu_read_lock();
-		struct task_struct *t = rcu_dereference(c->copygc_thread);
-		if (t)
-			wake_up_process(t);
-		rcu_read_unlock();
+	if (!ob)
 		ob = ERR_PTR(-BCH_ERR_no_buckets_found);
-	}
 
 	if (!IS_ERR(ob))
 		ob->data_type = data_type;
