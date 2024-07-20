@@ -1,9 +1,41 @@
 #!/usr/bin/make -f
 
+include /usr/share/dpkg/architecture.mk
+include /usr/share/rustc/architecture.mk
+
+export DEB_HOST_RUST_TYPE DEB_HOST_GNU_TYPE
+
+export DEB_BUILD_MAINT_OPTIONS=hardening=+all
+export CARGO=/usr/share/cargo/bin/cargo
+export CARGO_HOME=$(CURDIR)/debian/cargo_home
+export DEB_CARGO_CRATE=bcachefs-tools_$(DEB_VERSION_UPSTREAM)
+
 PREFIX := /usr
+ROOT_SBINDIR := /usr/sbin
+
+DEB_BUILD_ARCH ?= $(shell dpkg-architecture -qDEB_BUILD_ARCH)
+
+ifeq ($(DEB_BUILD_ARCH),amd64)
+    DEB_BUILD_MAINT_OPTIONS += optimize=-lto
+endif
 
 %:
-	dh $@ --with python3
+	dh $@
+
+override_dh_auto_configure:
+	$(CARGO) prepare-debian $(CURDIR)/vendor --link-from-system
+
+override_dh_auto_build:
+	$(RM) Cargo.lock
+	dh_auto_build -- CARGO="$(CARGO)"
 
 override_dh_auto_install:
-	dh_auto_install -- "PREFIX=$(PREFIX)"
+	dh_auto_install -- "PREFIX=$(PREFIX)" "ROOT_SBINDIR=$(ROOT_SBINDIR)"
+
+override_dh_auto_clean:
+	! [ -d $(CURDIR)/vendor ] || $(RM) -r $(CURDIR)/vendor
+	! [ -d $(CARGO_HOME) ] || $(RM) -r $(CARGO_HOME)
+	$(RM) Cargo.lock
+	dh_auto_clean
+
+override_dh_auto_test:

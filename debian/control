@@ -1,18 +1,39 @@
 Source: bcachefs-tools
-Maintainer: Kent Overstreet <kent.overstreet@gmail.com>
+Maintainer: Jonathan Carter <jcc@debian.org>
 Section: utils
 Priority: optional
-Standards-Version: 3.9.5
-Build-Depends: debhelper (>= 9), dh-python, pkg-config, libaio-dev, libblkid-dev,
-	libkeyutils-dev, liblz4-dev, libsodium-dev, liburcu-dev, libudev-dev,
-	libzstd-dev, uuid-dev, zlib1g-dev, python3, python3-docutils,
-	llvm, clang, libclang-dev, systemd, udev
+Standards-Version: 4.7.0
+Rules-Requires-Root: no
+Build-Depends: debhelper-compat (= 13),
+               python3:native,
+               pkgconf,
+               python3-docutils,
+               python3-pytest,
+               libaio-dev,
+               libfuse3-dev,
+               libblkid-dev,
+               libkeyutils-dev,
+               liblz4-dev,
+               libscrypt-dev,
+               libsodium-dev,
+               libudev-dev,
+               liburcu-dev,
+               libzstd-dev,
+               systemd-dev,
+               uuid-dev,
+               zlib1g-dev,
 Homepage: https://bcachefs.org/
+Vcs-Git: https://salsa.debian.org/jcc/bcachefs-tools.git
+Vcs-Browser: https://salsa.debian.org/jcc/bcachefs-tools
 
 Package: bcachefs-tools
 Architecture: linux-any
-Depends: ${shlibs:Depends}, ${misc:Depends}, ${python3:Depends}
+Depends: ${shlibs:Depends}, ${misc:Depends}, python3:any
 Recommends: initramfs-tools | linux-initramfs-tool
 Description: bcachefs userspace tools
  Userspace tools for bcachefs, a modern copy on write, checksumming, multi
  device filesystem.
+ .
+ Note: The current Debian kernels do not come with bcachefs support, you
+ will have to use your own kernel or one provided by a 3rd party that
+ contains bcachefs support.

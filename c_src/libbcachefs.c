@@ -227,7 +227,7 @@ struct bch_sb *bch2_format(struct bch_opt_strs	fs_opt_strs,
 			? bch2_opt_get_by_id(&fs_opts, opt_id)
 			: bch2_opt_get_by_id(&bch2_opts_default, opt_id);
 
-		__bch2_opt_set_sb(sb.sb, &bch2_opt_table[opt_id], v);
+		__bch2_opt_set_sb(sb.sb, -1, &bch2_opt_table[opt_id], v);
 	}
 
 	struct timespec now;
