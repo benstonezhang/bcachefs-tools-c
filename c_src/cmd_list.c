@@ -71,11 +71,13 @@ static int list_btree_formats(struct bch_fs *fs)
 {
 	struct btree_trans *trans = bch2_trans_get(fs);
 	struct btree_iter iter;
-	struct btree *b;
 	struct printbuf buf;
-	int ret = 0;
 
-	for_each_btree_node(trans, iter, tree_id, pos_start, BTREE_ITER_prefetch, b, ret) {
+	bch2_trans_node_iter_init(trans, &iter, tree_id, pos_start, 0,
+				  list_level, BTREE_ITER_prefetch);
+
+	while (1) {
+		struct btree *b = bch2_btree_iter_peek_node_and_restart(&iter);
 		if (bpos_cmp(b->key.k.p, pos_end) > 0)
 			break;
 		buf = PRINTBUF;
@@ -87,18 +89,20 @@ static int list_btree_formats(struct bch_fs *fs)
 	bch2_trans_iter_exit(trans, &iter);
 	bch2_trans_put(trans);
 
-	return ret;
+	return 0;
 }
 
 static int list_btree_nodes(struct bch_fs *fs)
 {
 	struct btree_trans *trans = bch2_trans_get(fs);
 	struct btree_iter iter;
-	struct btree *b;
 	struct printbuf buf;
-	int ret = 0;
 
-	for_each_btree_node(trans, iter, tree_id, pos_start, BTREE_ITER_prefetch, b, ret) {
+	bch2_trans_node_iter_init(trans, &iter, tree_id, pos_start, 0,
+				  list_level, BTREE_ITER_prefetch);
+	while (1) {
+		struct btree *b = bch2_btree_iter_peek_node_and_restart(&iter);
+
 		if (bpos_cmp(b->key.k.p, pos_end) > 0)
 			break;
 		buf = PRINTBUF;
@@ -110,18 +114,20 @@ static int list_btree_nodes(struct bch_fs *fs)
 	bch2_trans_iter_exit(trans, &iter);
 	bch2_trans_put(trans);
 
-	return ret;
+	return 0;
 }
 
 static int list_nodes_ondisk(struct bch_fs *fs)
 {
 	struct btree_trans *trans = bch2_trans_get(fs);
 	struct btree_iter iter;
-	struct btree *b;
 	struct printbuf buf;
-	int ret = 0;
 
-	for_each_btree_node(trans, iter, tree_id, pos_start, BTREE_ITER_prefetch, b, ret) {
+	bch2_trans_node_iter_init(trans, &iter, tree_id, pos_start, 0,
+				  list_level, BTREE_ITER_prefetch);
+	while (1) {
+		struct btree *b = bch2_btree_iter_peek_node_and_restart(&iter);
+
 		if (bpos_cmp(b->key.k.p, pos_end) > 0)
 			break;
 		buf = PRINTBUF;
@@ -133,7 +139,7 @@ static int list_nodes_ondisk(struct bch_fs *fs)
 	bch2_trans_iter_exit(trans, &iter);
 	bch2_trans_put(trans);
 
-	return ret;
+	return 0;
 }
 
 int cmd_list(int argc, char *argv[])
