@@ -107,24 +107,23 @@ struct ec_bio {
 
 /* Stripes btree keys: */
 
-int bch2_stripe_invalid(struct bch_fs *c, struct bkey_s_c k,
-			enum bch_validate_flags flags,
-			struct printbuf *err)
+int bch2_stripe_validate(struct bch_fs *c, struct bkey_s_c k,
+			 enum bch_validate_flags flags)
 {
 	const struct bch_stripe *s = bkey_s_c_to_stripe(k).v;
 	int ret = 0;
 
 	bkey_fsck_err_on(bkey_eq(k.k->p, POS_MIN) ||
-			 bpos_gt(k.k->p, POS(0, U32_MAX)), c, err,
-			 stripe_pos_bad,
+			 bpos_gt(k.k->p, POS(0, U32_MAX)),
+			 c, stripe_pos_bad,
 			 "stripe at bad pos");
 
-	bkey_fsck_err_on(bkey_val_u64s(k.k) < stripe_val_u64s(s), c, err,
-			 stripe_val_size_bad,
+	bkey_fsck_err_on(bkey_val_u64s(k.k) < stripe_val_u64s(s),
+			 c, stripe_val_size_bad,
 			 "incorrect value size (%zu < %u)",
 			 bkey_val_u64s(k.k), stripe_val_u64s(s));
 
-	ret = bch2_bkey_ptrs_invalid(c, k, flags, err);
+	ret = bch2_bkey_ptrs_validate(c, k, flags);
 fsck_err:
 	return ret;
 }
@@ -901,8 +900,8 @@ static int __ec_stripe_mem_alloc(struct bch_fs *c, size_t idx, gfp_t gfp)
 
 		mutex_lock(&c->ec_stripes_heap_lock);
 		if (n.size > h->size) {
-			memcpy(n.data, h->data, h->used * sizeof(h->data[0]));
-			n.used = h->used;
+			memcpy(n.data, h->data, h->nr * sizeof(h->data[0]));
+			n.nr = h->nr;
 			swap(*h, n);
 		}
 		mutex_unlock(&c->ec_stripes_heap_lock);
@@ -993,20 +992,12 @@ static u64 stripe_idx_to_delete(struct bch_fs *c)
 
 	lockdep_assert_held(&c->ec_stripes_heap_lock);
 
-	if (h->used &&
+	if (h->nr &&
 	    h->data[0].blocks_nonempty == 0 &&
 	    !bch2_stripe_is_open(c, h->data[0].idx))
 		return h->data[0].idx;
 
 	return 0;
-}
-
-static inline int ec_stripes_heap_cmp(ec_stripes_heap *h,
-				      struct ec_stripe_heap_entry l,
-				      struct ec_stripe_heap_entry r)
-{
-	return ((l.blocks_nonempty > r.blocks_nonempty) -
-		(l.blocks_nonempty < r.blocks_nonempty));
 }
 
 static inline void ec_stripes_heap_set_backpointer(ec_stripes_heap *h,
@@ -1017,39 +1008,71 @@ static inline void ec_stripes_heap_set_backpointer(ec_stripes_heap *h,
 	genradix_ptr(&c->stripes, h->data[i].idx)->heap_idx = i;
 }
 
+static inline bool ec_stripes_heap_cmp(const void *l, const void *r, void __always_unused *args)
+{
+	struct ec_stripe_heap_entry *_l = (struct ec_stripe_heap_entry *)l;
+	struct ec_stripe_heap_entry *_r = (struct ec_stripe_heap_entry *)r;
+
+	return ((_l->blocks_nonempty > _r->blocks_nonempty) <
+		(_l->blocks_nonempty < _r->blocks_nonempty));
+}
+
+static inline void ec_stripes_heap_swap(void *l, void *r, void *h)
+{
+	struct ec_stripe_heap_entry *_l = (struct ec_stripe_heap_entry *)l;
+	struct ec_stripe_heap_entry *_r = (struct ec_stripe_heap_entry *)r;
+	ec_stripes_heap *_h = (ec_stripes_heap *)h;
+	size_t i = _l - _h->data;
+	size_t j = _r - _h->data;
+
+	swap(*_l, *_r);
+
+	ec_stripes_heap_set_backpointer(_h, i);
+	ec_stripes_heap_set_backpointer(_h, j);
+}
+
 static void heap_verify_backpointer(struct bch_fs *c, size_t idx)
 {
 	ec_stripes_heap *h = &c->ec_stripes_heap;
 	struct stripe *m = genradix_ptr(&c->stripes, idx);
 
-	BUG_ON(m->heap_idx >= h->used);
+	BUG_ON(m->heap_idx >= h->nr);
 	BUG_ON(h->data[m->heap_idx].idx != idx);
 }
 
 void bch2_stripes_heap_del(struct bch_fs *c,
 			   struct stripe *m, size_t idx)
 {
+	const struct min_heap_callbacks callbacks = {
+		.less = ec_stripes_heap_cmp,
+		.swp = ec_stripes_heap_swap,
+	};
+
 	mutex_lock(&c->ec_stripes_heap_lock);
 	heap_verify_backpointer(c, idx);
 
-	heap_del(&c->ec_stripes_heap, m->heap_idx,
-		 ec_stripes_heap_cmp,
-		 ec_stripes_heap_set_backpointer);
+	min_heap_del(&c->ec_stripes_heap, m->heap_idx, &callbacks, &c->ec_stripes_heap);
 	mutex_unlock(&c->ec_stripes_heap_lock);
 }
 
 void bch2_stripes_heap_insert(struct bch_fs *c,
 			      struct stripe *m, size_t idx)
 {
-	mutex_lock(&c->ec_stripes_heap_lock);
-	BUG_ON(heap_full(&c->ec_stripes_heap));
+	const struct min_heap_callbacks callbacks = {
+		.less = ec_stripes_heap_cmp,
+		.swp = ec_stripes_heap_swap,
+	};
 
-	heap_add(&c->ec_stripes_heap, ((struct ec_stripe_heap_entry) {
+	mutex_lock(&c->ec_stripes_heap_lock);
+	BUG_ON(min_heap_full(&c->ec_stripes_heap));
+
+	genradix_ptr(&c->stripes, idx)->heap_idx = c->ec_stripes_heap.nr;
+	min_heap_push(&c->ec_stripes_heap, &((struct ec_stripe_heap_entry) {
 			.idx = idx,
 			.blocks_nonempty = m->blocks_nonempty,
 		}),
-		 ec_stripes_heap_cmp,
-		 ec_stripes_heap_set_backpointer);
+		&callbacks,
+		&c->ec_stripes_heap);
 
 	heap_verify_backpointer(c, idx);
 	mutex_unlock(&c->ec_stripes_heap_lock);
@@ -1058,6 +1081,10 @@ void bch2_stripes_heap_insert(struct bch_fs *c,
 void bch2_stripes_heap_update(struct bch_fs *c,
 			      struct stripe *m, size_t idx)
 {
+	const struct min_heap_callbacks callbacks = {
+		.less = ec_stripes_heap_cmp,
+		.swp = ec_stripes_heap_swap,
+	};
 	ec_stripes_heap *h = &c->ec_stripes_heap;
 	bool do_deletes;
 	size_t i;
@@ -1068,10 +1095,8 @@ void bch2_stripes_heap_update(struct bch_fs *c,
 	h->data[m->heap_idx].blocks_nonempty = m->blocks_nonempty;
 
 	i = m->heap_idx;
-	heap_sift_up(h,	  i, ec_stripes_heap_cmp,
-		     ec_stripes_heap_set_backpointer);
-	heap_sift_down(h, i, ec_stripes_heap_cmp,
-		       ec_stripes_heap_set_backpointer);
+	min_heap_sift_up(h,	i, &callbacks, &c->ec_stripes_heap);
+	min_heap_sift_down(h, i, &callbacks, &c->ec_stripes_heap);
 
 	heap_verify_backpointer(c, idx);
 
@@ -1783,6 +1808,9 @@ static int new_stripe_alloc_buckets(struct btree_trans *trans, struct ec_stripe_
 	BUG_ON(v->nr_blocks	!= h->s->nr_data + h->s->nr_parity);
 	BUG_ON(v->nr_redundant	!= h->s->nr_parity);
 
+	/* * We bypass the sector allocator which normally does this: */
+	bitmap_and(devs.d, devs.d, c->rw_devs[BCH_DATA_user].d, BCH_SB_MEMBERS_MAX);
+
 	for_each_set_bit(i, h->s->blocks_gotten, v->nr_blocks) {
 		__clear_bit(v->ptrs[i].dev, devs.d);
 		if (i < h->s->nr_data)
@@ -1864,7 +1892,7 @@ static s64 get_existing_stripe(struct bch_fs *c,
 		return -1;
 
 	mutex_lock(&c->ec_stripes_heap_lock);
-	for (heap_idx = 0; heap_idx < h->used; heap_idx++) {
+	for (heap_idx = 0; heap_idx < h->nr; heap_idx++) {
 		/* No blocks worth reusing, stripe will just be deleted: */
 		if (!h->data[heap_idx].blocks_nonempty)
 			continue;
@@ -2195,7 +2223,7 @@ void bch2_stripes_heap_to_text(struct printbuf *out, struct bch_fs *c)
 	size_t i;
 
 	mutex_lock(&c->ec_stripes_heap_lock);
-	for (i = 0; i < min_t(size_t, h->used, 50); i++) {
+	for (i = 0; i < min_t(size_t, h->nr, 50); i++) {
 		m = genradix_ptr(&c->stripes, h->data[i].idx);
 
 		prt_printf(out, "%zu %u/%u+%u", h->data[i].idx,
@@ -2207,6 +2235,23 @@ void bch2_stripes_heap_to_text(struct printbuf *out, struct bch_fs *c)
 		prt_newline(out);
 	}
 	mutex_unlock(&c->ec_stripes_heap_lock);
+}
+
+static void bch2_new_stripe_to_text(struct printbuf *out, struct bch_fs *c,
+				    struct ec_stripe_new *s)
+{
+	prt_printf(out, "\tidx %llu blocks %u+%u allocated %u ref %u %u %s obs",
+		   s->idx, s->nr_data, s->nr_parity,
+		   bitmap_weight(s->blocks_allocated, s->nr_data),
+		   atomic_read(&s->ref[STRIPE_REF_io]),
+		   atomic_read(&s->ref[STRIPE_REF_stripe]),
+		   bch2_watermarks[s->h->watermark]);
+
+	struct bch_stripe *v = &bkey_i_to_stripe(&s->new_stripe.key)->v;
+	unsigned i;
+	for_each_set_bit(i, s->blocks_gotten, v->nr_blocks)
+		prt_printf(out, " %u", s->blocks[i]);
+	prt_newline(out);
 }
 
 void bch2_new_stripes_to_text(struct printbuf *out, struct bch_fs *c)
@@ -2221,23 +2266,15 @@ void bch2_new_stripes_to_text(struct printbuf *out, struct bch_fs *c)
 		       bch2_watermarks[h->watermark]);
 
 		if (h->s)
-			prt_printf(out, "\tidx %llu blocks %u+%u allocated %u\n",
-			       h->s->idx, h->s->nr_data, h->s->nr_parity,
-			       bitmap_weight(h->s->blocks_allocated,
-					     h->s->nr_data));
+			bch2_new_stripe_to_text(out, c, h->s);
 	}
 	mutex_unlock(&c->ec_stripe_head_lock);
 
 	prt_printf(out, "in flight:\n");
 
 	mutex_lock(&c->ec_stripe_new_lock);
-	list_for_each_entry(s, &c->ec_stripe_new_list, list) {
-		prt_printf(out, "\tidx %llu blocks %u+%u ref %u %u %s\n",
-			   s->idx, s->nr_data, s->nr_parity,
-			   atomic_read(&s->ref[STRIPE_REF_io]),
-			   atomic_read(&s->ref[STRIPE_REF_stripe]),
-			   bch2_watermarks[s->h->watermark]);
-	}
+	list_for_each_entry(s, &c->ec_stripe_new_list, list)
+		bch2_new_stripe_to_text(out, c, s);
 	mutex_unlock(&c->ec_stripe_new_lock);
 }
 

@@ -64,9 +64,6 @@ int cmd_kill_btree_node(int argc, char *argv[])
 	if (IS_ERR(c))
 		die("error opening %s: %s", argv[0], bch2_err_str(PTR_ERR(c)));
 
-	struct btree_trans *trans = bch2_trans_get(c);
-	struct btree_iter iter;
-	struct btree *b;
 	int ret;
 	void *zeroes;
 
@@ -74,47 +71,47 @@ int cmd_kill_btree_node(int argc, char *argv[])
 	if (ret)
 		die("error %s from posix_memalign", bch2_err_str(ret));
 
-	__for_each_btree_node(trans, iter, btree_id, POS_MIN, 0, level, 0, b, ret) {
-		if (b->c.level != level)
-			continue;
+	ret = bch2_trans_run(c,
+		__for_each_btree_node(trans, iter, btree_id, POS_MIN, 0, level, 0, b, ({
+			if (b->c.level != level)
+				continue;
 
-		if (!node_index) {
-			struct printbuf buf = PRINTBUF;
-			bch2_bkey_val_to_text(&buf, c, bkey_i_to_s_c(&b->key));
-			bch_info(c, "killing btree node %s", buf.buf);
-			printbuf_exit(&buf);
+			int ret2 = 0;
+			if (!node_index) {
+				struct printbuf buf = PRINTBUF;
+				bch2_bkey_val_to_text(&buf, c, bkey_i_to_s_c(&b->key));
+				bch_info(c, "killing btree node %s", buf.buf);
+				printbuf_exit(&buf);
 
-			struct bkey_ptrs_c ptrs = bch2_bkey_ptrs_c(bkey_i_to_s_c(&b->key));
-			bkey_for_each_ptr(ptrs, ptr) {
-				struct bch_dev *ca = bch2_dev_tryget(c, ptr->dev);
-				if (!ca)
-					continue;
+				ret2 = 1;
 
-				ret = pwrite(ca->disk_sb.bdev->bd_fd, zeroes,
-					     c->opts.block_size, ptr->offset << 9);
-				bch2_dev_put(ca);
-				if (ret != c->opts.block_size) {
-					bch_err(c, "pwrite error: expected %u got %i %s",
-						c->opts.block_size, ret, strerror(errno));
-					ret = EXIT_FAILURE;
-					goto done;
+				struct bkey_ptrs_c ptrs = bch2_bkey_ptrs_c(bkey_i_to_s_c(&b->key));
+				bkey_for_each_ptr(ptrs, ptr) {
+					struct bch_dev *ca = bch2_dev_tryget(c, ptr->dev);
+					if (!ca)
+						continue;
+
+					int ret3 = pwrite(ca->disk_sb.bdev->bd_fd, zeroes,
+						     c->opts.block_size, ptr->offset << 9);
+					bch2_dev_put(ca);
+					if (ret3 != c->opts.block_size) {
+						bch_err(c, "pwrite error: expected %u got %i %s",
+							c->opts.block_size, ret, strerror(errno));
+						ret2 = EXIT_FAILURE;
+					}
 				}
 			}
-			ret = 0;
-			goto done;
-		}
 
-		node_index--;
-	}
-	if (ret)
+			node_index--;
+			ret2;
+		})));
+	if (ret < 0)
 		bch_err(c, "error %i walking btree nodes", ret);
-	else
+	else if (!ret) {
 		bch_err(c, "node at specified index not found");
-	ret = EXIT_FAILURE;
-done:
-	bch2_trans_iter_exit(trans, &iter);
-	bch2_trans_put(trans);
+		ret = EXIT_FAILURE;
+	}
 
 	bch2_fs_stop(c);
-	return ret;
+	return ret < 0 ? ret : 0;
 }

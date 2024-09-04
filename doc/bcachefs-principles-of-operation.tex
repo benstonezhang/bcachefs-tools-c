@@ -394,7 +394,7 @@ The following subcommands exist for managing subvolumes and snapshots:
 		existing subvolume
 \end{itemize}
 
-A subvolume can also be deleting with a normal rmdir after deleting all the
+A subvolume can also be deleted with a normal rmdir after deleting all the
 contents, as with \texttt{rm -rf}. Still to be implemented: read-only snapshots,
 recursive snapshot creation, and a method for recursively listing subvolumes.
 
@@ -505,8 +505,8 @@ the \texttt{journal\_reclaim\_delay} parameter, with a default of 100
 milliseconds.
 
 The journal should be sized sufficiently that bursts of activity do not fill up
-the journal too quickly; also, a larger journal mean that we can queue up larger
-btree writes. The \texttt{bcachefs device resize-journal} can be used for
+the journal too quickly; also, a larger journal means that we can queue up
+larger btree writes. The \texttt{bcachefs device resize-journal} can be used for
 resizing the journal on disk on a particular device - it can be used on a
 mounted or unmounted filesystem.
 
@@ -578,8 +578,8 @@ ensuring that checksums are valid, fixing bitrot when a valid copy can be found.
 Most bcachefs options can be set filesystem wide, and a significant subset can
 also be set on inodes (files and directories), overriding the global defaults.
 Filesystem wide options may be set when formatting, when mounting, or at runtime
-via \texttt{/sys/fs/bcachefs/<uuid>/options/}. When set at runtime via sysfs the
-persistent options in the superblock are updated as well; when options are
+via \texttt{/sys/fs/bcachefs/<uuid>/options/}. When set at runtime via sysfs,
+the persistent options in the superblock are updated as well; when options are
 passed as mount parameters the persistent options are unmodified.
 
 \subsection{File and directory options}
@@ -593,8 +593,8 @@ inherited attributes to change we fail the rename with -EXDEV, causing userspace
 to do the rename file by file so that inherited attributes stay consistent.
 
 Inode options are available as extended attributes. The options that have been
-explicitly set are available under the \texttt{bcachefs} namespace, and the effective
-options (explicitly set and inherited options) are available under the
+explicitly set are available under the \texttt{bcachefs} namespace, and the
+effective options (explicitly set and inherited options) are available under the
 \texttt{bcachefs\_effective} namespace. Examples of listing options with the
 getfattr command:
 
@@ -1150,7 +1150,7 @@ variable length sections:
 
 	\item \texttt{BCH\_SB\_FIELD\_replicas} \\
 		Contains a list of replica entries, which are lists of devices
-		that have extents replicated across them. 
+		that have extents replicated across them.
 
 	\item \texttt{BCH\_SB\_FIELD\_quota} \\
 		Contains timelimit and warnlimit fields for each quota type

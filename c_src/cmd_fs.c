@@ -185,7 +185,7 @@ static void replicas_usage_to_text(struct printbuf *out,
 		unsigned dev_idx = r->devs[i];
 		struct dev_name *dev = dev_idx_to_name(dev_names, dev_idx);
 
-		durability += dev->durability;
+		durability += dev ? dev->durability : 0;
 
 		if (i)
 			*d++ = ' ';

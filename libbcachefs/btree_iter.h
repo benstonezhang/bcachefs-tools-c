@@ -618,23 +618,35 @@ void bch2_trans_srcu_unlock(struct btree_trans *);
 
 u32 bch2_trans_begin(struct btree_trans *);
 
-/*
- * XXX
- * this does not handle transaction restarts from bch2_btree_iter_next_node()
- * correctly
- */
-#define __for_each_btree_node(_trans, _iter, _btree_id, _start,		\
-			      _locks_want, _depth, _flags, _b, _ret)	\
-	for (bch2_trans_node_iter_init((_trans), &(_iter), (_btree_id),	\
-				_start, _locks_want, _depth, _flags);	\
-	     (_b) = bch2_btree_iter_peek_node_and_restart(&(_iter)),	\
-	     !((_ret) = PTR_ERR_OR_ZERO(_b)) && (_b);			\
-	     (_b) = bch2_btree_iter_next_node(&(_iter)))
+#define __for_each_btree_node(_trans, _iter, _btree_id, _start,			\
+			      _locks_want, _depth, _flags, _b, _do)		\
+({										\
+	bch2_trans_begin((_trans));						\
+										\
+	struct btree_iter _iter;						\
+	bch2_trans_node_iter_init((_trans), &_iter, (_btree_id),		\
+				  _start, _locks_want, _depth, _flags);		\
+	int _ret3 = 0;								\
+	do {									\
+		_ret3 = lockrestart_do((_trans), ({				\
+			struct btree *_b = bch2_btree_iter_peek_node(&_iter);	\
+			if (!_b)						\
+				break;						\
+										\
+			PTR_ERR_OR_ZERO(_b) ?: (_do);				\
+		})) ?:								\
+		lockrestart_do((_trans),					\
+			PTR_ERR_OR_ZERO(bch2_btree_iter_next_node(&_iter)));	\
+	} while (!_ret3);							\
+										\
+	bch2_trans_iter_exit((_trans), &(_iter));				\
+	_ret3;									\
+})
 
 #define for_each_btree_node(_trans, _iter, _btree_id, _start,		\
-			    _flags, _b, _ret)				\
-	__for_each_btree_node(_trans, _iter, _btree_id, _start,		\
-			      0, 0, _flags, _b, _ret)
+			    _flags, _b, _do)				\
+	__for_each_btree_node(_trans, _iter, _btree_id, _start,	\
+			      0, 0, _flags, _b, _do)
 
 static inline struct bkey_s_c bch2_btree_iter_peek_prev_type(struct btree_iter *iter,
 							     unsigned flags)
@@ -811,20 +823,6 @@ transaction_restart:							\
 
 struct bkey_s_c bch2_btree_iter_peek_and_restart_outlined(struct btree_iter *);
 
-static inline struct bkey_s_c
-__bch2_btree_iter_peek_and_restart(struct btree_trans *trans,
-				   struct btree_iter *iter, unsigned flags)
-{
-	struct bkey_s_c k;
-
-	while (btree_trans_too_many_iters(trans) ||
-	       (k = bch2_btree_iter_peek_type(iter, flags),
-		bch2_err_matches(bkey_err(k), BCH_ERR_transaction_restart)))
-		bch2_trans_begin(trans);
-
-	return k;
-}
-
 #define for_each_btree_key_upto_norestart(_trans, _iter, _btree_id,	\
 			   _start, _end, _flags, _k, _ret)		\
 	for (bch2_trans_iter_init((_trans), &(_iter), (_btree_id),	\
@@ -865,7 +863,7 @@ __bch2_btree_iter_peek_and_restart(struct btree_trans *trans,
 									\
 	if (bch2_err_matches(_ret, ENOMEM)) {				\
 		_gfp = GFP_KERNEL;					\
-		_ret = drop_locks_do(trans, _do);			\
+		_ret = drop_locks_do(_trans, _do);			\
 	}								\
 	_ret;								\
 })
@@ -878,7 +876,7 @@ __bch2_btree_iter_peek_and_restart(struct btree_trans *trans,
 	_ret = 0;							\
 	if (unlikely(!_p)) {						\
 		_gfp = GFP_KERNEL;					\
-		_ret = drop_locks_do(trans, ((_p = _do), 0));		\
+		_ret = drop_locks_do(_trans, ((_p = _do), 0));		\
 	}								\
 	_p;								\
 })

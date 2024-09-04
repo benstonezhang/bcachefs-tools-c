@@ -113,6 +113,8 @@ static void append_opt(struct printbuf *out, const char *opt)
 
 static bool should_use_kernel_fsck(darray_str devs)
 {
+	system("modprobe bcachefs");
+
 	unsigned kernel_version = !access("/sys/module/bcachefs/parameters/version", R_OK)
 	    ? read_file_u64(AT_FDCWD, "/sys/module/bcachefs/parameters/version")
 	    : 0;

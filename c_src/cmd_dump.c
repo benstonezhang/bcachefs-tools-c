@@ -70,26 +70,24 @@ static void dump_one_device(struct bch_fs *c, struct bch_dev *ca, int fd,
 	/* Btree: */
 	for (i = 0; i < BTREE_ID_NR; i++) {
 		struct btree_trans *trans = bch2_trans_get(c);
-		struct btree_iter iter;
-		struct btree *b;
 
-		__for_each_btree_node(trans, iter, i, POS_MIN, 0, 1, 0, b, ret) {
+		ret = __for_each_btree_node(trans, iter, i, POS_MIN, 0, 1, 0, b, ({
 			struct btree_node_iter iter;
 			struct bkey u;
 			struct bkey_s_c k;
 
 			for_each_btree_node_key_unpack(b, k, &iter, &u)
 				dump_node(c, ca, k, &data);
-		}
+			0;
+		}));
 
 		if (ret)
 			die("error %s walking btree nodes", bch2_err_str(ret));
 
-		b = bch2_btree_id_root(c, i)->b;
+		struct btree *b = bch2_btree_id_root(c, i)->b;
 		if (!btree_node_fake(b))
 			dump_node(c, ca, bkey_i_to_s_c(&b->key), &data);
 
-		bch2_trans_iter_exit(trans, &iter);
 		bch2_trans_put(trans);
 	}
 

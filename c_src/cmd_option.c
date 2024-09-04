@@ -88,8 +88,6 @@ int cmd_set_option(int argc, char *argv[])
 			exit(EXIT_FAILURE);
 		}
 
-		mutex_lock(&c->sb_lock);
-
 		for (i = 0; i < bch2_opts_nr; i++) {
 			const struct bch_option *opt = bch2_opt_table + i;
 
@@ -108,7 +106,7 @@ int cmd_set_option(int argc, char *argv[])
 				fprintf(stderr, "Can't set option %s\n", opt->attr.name);
 
 			if (opt->flags & OPT_FS) {
-				__bch2_opt_set_sb(c->disk_sb.sb, -1, opt, v);
+				bch2_opt_set_sb(c, NULL, opt, v);
 			}
 
 			if (opt->flags & OPT_DEVICE) {
@@ -119,13 +117,10 @@ int cmd_set_option(int argc, char *argv[])
 						continue;
 					}
 
-					__bch2_opt_set_sb(c->disk_sb.sb, dev_idx, opt, v);
+					bch2_opt_set_sb(c, c->devs[dev_idx], opt, v);
 				}
 			}
 		}
-
-		bch2_write_super(c);
-		mutex_unlock(&c->sb_lock);
 
 		bch2_fs_stop(c);
 		return ret;

@@ -145,6 +145,7 @@
 	x(BCH_ERR_transaction_restart,	transaction_restart_journal_preres_get)	\
 	x(BCH_ERR_transaction_restart,	transaction_restart_split_race)		\
 	x(BCH_ERR_transaction_restart,	transaction_restart_write_buffer_flush)	\
+	x(BCH_ERR_transaction_restart,	transaction_restart_freeing_inode)		\
 	x(BCH_ERR_transaction_restart,	transaction_restart_nested)		\
 	x(0,				no_btree_node)				\
 	x(BCH_ERR_no_btree_node,	no_btree_node_relock)			\
@@ -166,6 +167,7 @@
 	x(0,				journal_reclaim_would_deadlock)		\
 	x(EINVAL,			fsck)					\
 	x(BCH_ERR_fsck,			fsck_fix)				\
+	x(BCH_ERR_fsck,			fsck_delete_bkey)			\
 	x(BCH_ERR_fsck,			fsck_ignore)				\
 	x(BCH_ERR_fsck,			fsck_errors_not_fixed)			\
 	x(BCH_ERR_fsck,			fsck_repair_unimplemented)		\
