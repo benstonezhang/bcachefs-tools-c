@@ -44,6 +44,20 @@ static inline struct timespec timespec_trunc(struct timespec t, unsigned gran)
 	return t;
 }
 
+static inline void set_normalized_timespec64(struct timespec64 *ts, time64_t sec, s64 nsec)
+{
+	while (nsec >= NSEC_PER_SEC) {
+		nsec -= NSEC_PER_SEC;
+		++sec;
+	}
+	while (nsec < 0) {
+		nsec += NSEC_PER_SEC;
+		--sec;
+	}
+	ts->tv_sec = sec;
+	ts->tv_nsec = nsec;
+}
+
 #define ns_to_timespec64	ns_to_timespec
 #define timespec64_to_ns	timespec_to_ns
 #define timespec64_trunc	timespec_trunc

@@ -81,8 +81,7 @@
 	x(trans_restart_write_buffer_flush,		75)	\
 	x(trans_restart_split_race,			76)	\
 	x(write_buffer_flush_slowpath,			77)	\
-	x(write_buffer_flush_sync,			78)	\
-	x(trans_restart_freeing_inode,			79)
+	x(write_buffer_flush_sync,			78)
 
 enum bch_persistent_counters {
 #define x(t, n, ...) BCH_COUNTER_##t,

@@ -26,8 +26,8 @@
 
 static void set_option_usage(void)
 {
-	puts("bcachefs set-option \n"
-	     "Usage: bcachefs set-option [OPTION].. device\n"
+	puts("bcachefs set-fs-option \n"
+	     "Usage: bcachefs set-fs-option [OPTION].. device\n"
 	     "\n"
 	     "Options:\n");
 	bch2_opts_usage(OPT_MOUNT);

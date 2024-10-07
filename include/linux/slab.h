@@ -18,6 +18,7 @@
 #define alloc_hooks(_do, ...)		_do
 
 #define ARCH_KMALLOC_MINALIGN		16
+#define ARCH_SLAB_MINALIGN		16
 #define KMALLOC_MAX_SIZE		SIZE_MAX
 
 #define MAX_PAGE_ORDER			10
@@ -101,6 +102,8 @@ static inline void *kmalloc_array(size_t n, size_t size, gfp_t flags)
 #define kvmalloc_array(n, size, flags)					\
 	((size) != 0 && (n) > SIZE_MAX / (size)				\
 	 ? NULL : kmalloc((n) * (size), flags))
+
+#define kvmalloc_array_noprof(...)	kvmalloc_array(__VA_ARGS__)
 
 #define kcalloc(n, size, flags)		kmalloc_array(n, size, flags|__GFP_ZERO)
 

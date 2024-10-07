@@ -1203,6 +1203,7 @@ int cmd_fusemount(int argc, char *argv[])
 	struct bch_opts bch_opts = bch2_opts_empty();
 	struct bf_context ctx = { 0 };
 	struct bch_fs *c = NULL;
+	struct fuse_session *se = NULL;
 	int ret = 0, i;
 
 	/* Parse arguments. */
@@ -1263,17 +1264,22 @@ int cmd_fusemount(int argc, char *argv[])
 		    bch2_err_str(PTR_ERR(c)));
 
 	/* Fuse */
-	struct fuse_session *se =
-		fuse_session_new(&args, &bcachefs_fuse_ops,
-				 sizeof(bcachefs_fuse_ops), c);
-	if (!se)
-		die("fuse_lowlevel_new err: %m");
+	se = fuse_session_new(&args, &bcachefs_fuse_ops,
+				sizeof(bcachefs_fuse_ops), c);
+	if (!se) {
+		fprintf(stderr, "fuse_lowlevel_new err: %m\n");
+		goto err;
+	}
 
-	if (fuse_set_signal_handlers(se) < 0)
-		die("fuse_set_signal_handlers err: %m");
+	if (fuse_set_signal_handlers(se) < 0) {
+		fprintf(stderr, "fuse_set_signal_handlers err: %m\n");
+		goto err;
+	}
 
-	if (fuse_session_mount(se, fuse_opts.mountpoint))
-		die("fuse_mount err: %m");
+	if (fuse_session_mount(se, fuse_opts.mountpoint)) {
+		fprintf(stderr, "fuse_mount err: %m\n");
+		goto err;
+	}
 
 	/* This print statement is a trigger for tests. */
 	printf("Fuse mount initialized.\n");
@@ -1287,17 +1293,22 @@ int cmd_fusemount(int argc, char *argv[])
 
 	ret = fuse_session_loop(se);
 
-	/* Cleanup */
-	fuse_session_unmount(se);
-	fuse_remove_signal_handlers(se);
-	fuse_session_destroy(se);
-
 out:
+	if (se) {
+		fuse_session_unmount(se);
+		fuse_remove_signal_handlers(se);
+		fuse_session_destroy(se);
+	}
+
 	free(fuse_opts.mountpoint);
 	fuse_opt_free_args(&args);
 	bf_context_free(&ctx);
 
 	return ret ? 1 : 0;
+
+err:
+	bch2_fs_stop(c);
+	goto out;
 }
 
 #endif /* BCACHEFS_FUSE */

@@ -3,6 +3,7 @@
 #define _TOOLS_LINUX_MM_H
 
 #include <sys/syscall.h>
+#include <unistd.h>
 #include <linux/types.h>
 
 struct sysinfo {

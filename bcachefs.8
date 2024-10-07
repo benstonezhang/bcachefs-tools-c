@@ -20,7 +20,7 @@ which are documented in detail below:
 Format one or a list of devices with bcachefs data structures.
 .It Ic show-super
 Dump superblock information to stdout.
-.It Ic set-option
+.It Ic set-fs-option
 Set a filesystem option
 .El
 .Ss Mount commands
@@ -248,7 +248,7 @@ List of sections to print
 .It Fl l , Fl -layout
 Print superblock layout
 .El
-.It Nm Ic set-option Oo Ar options Oc Ar device
+.It Nm Ic set-fs-option Oo Ar options Oc Ar device
 .Bl -tag -width Ds
 .It Fl -errors Ns = Ns ( Cm continue | ro | panic )
 Action to take on filesystem error

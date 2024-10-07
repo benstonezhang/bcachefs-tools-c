@@ -1,4 +1,4 @@
-VERSION=1.9.5
+VERSION=1.12.0
 
 PREFIX?=/usr/local
 LIBEXECDIR?=$(PREFIX)/libexec
@@ -52,7 +52,7 @@ CFLAGS+=$(call cc-disable-warning, shift-overflow)
 CFLAGS+=$(call cc-disable-warning, enum-conversion)
 CFLAGS+=$(call cc-disable-warning, gnu-variable-sized-type-not-at-end)
 
-PKGCONFIG_LIBS="blkid uuid liburcu libsodium zlib liblz4 libzstd libudev libkeyutils udev"
+PKGCONFIG_LIBS="blkid uuid liburcu libsodium zlib liblz4 libzstd libudev libkeyutils"
 ifdef BCACHEFS_FUSE
 	PKGCONFIG_LIBS+="fuse3 >= 3.7"
 	CFLAGS+=-DBCACHEFS_FUSE
@@ -265,7 +265,7 @@ tarball: $(SRCTARXZ)
 
 $(SRCTARXZ) : .gitcensus
 	$(Q)tar --transform "s,^,$(SRCDIR)/," -Jcf $(SRCDIR).tar.xz  \
-	    `cat .gitcensus` 
+	    `cat .gitcensus`
 	@echo Wrote: $@
 
 .PHONY: .gitcensus

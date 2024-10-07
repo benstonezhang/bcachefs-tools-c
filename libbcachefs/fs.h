@@ -146,6 +146,8 @@ struct bch_inode_info *
 __bch2_create(struct mnt_idmap *, struct bch_inode_info *,
 	      struct dentry *, umode_t, dev_t, subvol_inum, unsigned);
 
+struct bch_inode_info *__bch2_inode_hash_find(struct bch_fs *, subvol_inum);
+
 int bch2_fs_quota_transfer(struct bch_fs *,
 			   struct bch_inode_info *,
 			   struct bch_qid,
@@ -195,6 +197,11 @@ int bch2_vfs_init(void);
 #else
 
 #define bch2_inode_update_after_write(_trans, _inode, _inode_u, _fields)	({ do {} while (0); })
+
+static inline struct bch_inode_info *__bch2_inode_hash_find(struct bch_fs *c, subvol_inum inum)
+{
+	return NULL;
+}
 
 static inline void bch2_evict_subvolume_inodes(struct bch_fs *c,
 					       snapshot_id_list *s) {}

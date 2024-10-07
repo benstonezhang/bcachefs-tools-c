@@ -29,9 +29,10 @@ time, mount time (as mount -o parameters), or changed at runtime via sysfs (via
 the /sys/fs/bcachefs/<UUID>/options/ directory).
 
 Many of those options (particularly those that control the IO path) can also be
-set on individual files and directories, via the bcachefs setattr command (which
-internally mostly works via the extended attribute interface, but the setattr
-command takes care to propagate options to children correctly).
+set on individual files and directories, via the bcachefs set-file-option
+command (which internally mostly works via the extended attribute interface, but
+the set-file-option command takes care to propagate options to children
+correctly).
 
 OPTIONS
 -------
@@ -48,7 +49,7 @@ at the same time.
 We generally avoid per-device options, preferring instead options that can be
 overridden on files or directories, but there are some:
 
- *durability* 
+ *durability*
 
 Device labels, targets
 ----------------------
