@@ -1,4 +1,4 @@
-VERSION=1.12.0
+VERSION=1.13.0
 
 PREFIX?=/usr/local
 LIBEXECDIR?=$(PREFIX)/libexec
@@ -129,9 +129,6 @@ all: bcachefs $(optional_build)
 debug: CFLAGS+=-Werror -DCONFIG_BCACHEFS_DEBUG=y -DCONFIG_VALGRIND=y
 debug: bcachefs
 
-.PHONY: tests
-tests: tests/test_helper
-
 .PHONY: TAGS tags
 TAGS:
 	ctags -e -R .
@@ -158,10 +155,6 @@ bcachefs: $(BCACHEFS_DEPS)
 libbcachefs.a: $(filter-out ./tests/%.o, $(OBJS))
 	@echo "    [AR]     $@"
 	$(Q)$(AR) -rc $@ $+
-
-tests/test_helper: $(filter ./tests/%.o, $(OBJS))
-	@echo "    [LD]     $@"
-	$(Q)$(CC) $(LDFLAGS) $+ $(LOADLIBES) $(LDLIBS) -o $@
 
 # If the version string differs from the last build, update the last version
 ifneq ($(VERSION),$(shell cat .version 2>/dev/null))
@@ -202,7 +195,7 @@ install_systemd: $(systemd_services) $(systemd_libexecfiles)
 .PHONY: clean
 clean:
 	@echo "Cleaning all"
-	$(Q)$(RM) libbcachefs.a c_src/libbcachefs.a tests/test_helper .version *.tar.xz $(OBJS) $(DEPS) $(DOCGENERATED)
+	$(Q)$(RM) libbcachefs.a c_src/libbcachefs.a .version *.tar.xz $(OBJS) $(DEPS) $(DOCGENERATED)
 	$(Q)$(RM) -f $(built_scripts)
 
 .PHONY: deb

@@ -111,6 +111,7 @@ static inline void *kmalloc_array(size_t n, size_t size, gfp_t flags)
 #define kzfree(p)			free((void *) p)
 
 #define kvmalloc(size, flags)		kmalloc(size, flags)
+#define kvmalloc_noprof(size, flags)	kmalloc(size, flags)
 #define kvzalloc(size, flags)		kzalloc(size, flags)
 #define kvfree(p)			kfree(p)
 
@@ -273,6 +274,8 @@ static inline void *vmalloc(unsigned long size)
 {
 	return __vmalloc(size, GFP_KERNEL);
 }
+
+#define vmalloc_noprof(...)	vmalloc(__VA_ARGS__)
 
 static inline void *vzalloc(unsigned long size)
 {

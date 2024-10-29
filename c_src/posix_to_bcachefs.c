@@ -32,7 +32,7 @@ void create_link(struct bch_fs *c,
 	struct bch_inode_unpacked parent_u;
 	struct bch_inode_unpacked inode;
 
-	int ret = bch2_trans_do(c, NULL, NULL, 0,
+	int ret = bch2_trans_commit_do(c, NULL, NULL, 0,
 		bch2_link_trans(trans,
 				(subvol_inum) { 1, parent->bi_inum }, &parent_u,
 				(subvol_inum) { 1, inum }, &inode, &qstr));
@@ -51,7 +51,7 @@ struct bch_inode_unpacked create_file(struct bch_fs *c,
 
 	bch2_inode_init_early(c, &new_inode);
 
-	int ret = bch2_trans_do(c, NULL, NULL, 0,
+	int ret = bch2_trans_commit_do(c, NULL, NULL, 0,
 		bch2_create_trans(trans,
 				  (subvol_inum) { 1, parent->bi_inum }, parent,
 				  &new_inode, &qstr,
@@ -125,7 +125,7 @@ void copy_xattrs(struct bch_fs *c, struct bch_inode_unpacked *dst,
 		if (IS_ERR(h))
 			continue;
 
-		int ret = bch2_trans_do(c, NULL, NULL, 0,
+		int ret = bch2_trans_commit_do(c, NULL, NULL, 0,
 				bch2_xattr_set(trans,
 					       (subvol_inum) { 1, dst->bi_inum },
 					       dst, &hash_info, attr,

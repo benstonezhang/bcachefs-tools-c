@@ -242,7 +242,7 @@ static int do_create(struct bch_fs *c, subvol_inum dir,
 
 	bch2_inode_init_early(c, new_inode);
 
-	return bch2_trans_do(c, NULL, NULL, 0,
+	return bch2_trans_commit_do(c, NULL, NULL, 0,
 			bch2_create_trans(trans,
 				dir, &dir_u,
 				new_inode, &qstr,
@@ -295,7 +295,7 @@ static void bcachefs_fuse_unlink(fuse_req_t req, fuse_ino_t dir_ino,
 
 	fuse_log(FUSE_LOG_DEBUG, "bcachefs_fuse_unlink(%llu, %s)\n", dir.inum, name);
 
-	int ret = bch2_trans_do(c, NULL, NULL,
+	int ret = bch2_trans_commit_do(c, NULL, NULL,
 				BCH_TRANS_COMMIT_no_enospc,
 			    bch2_unlink_trans(trans, dir, &dir_u,
 					      &inode_u, &qstr, false));
@@ -330,7 +330,7 @@ static void bcachefs_fuse_rename(fuse_req_t req,
 		 src_dir.inum, srcname, dst_dir.inum, dstname, flags);
 
 	/* XXX handle overwrites */
-	ret = bch2_trans_do(c, NULL, NULL, 0,
+	ret = bch2_trans_commit_do(c, NULL, NULL, 0,
 		bch2_rename_trans(trans,
 				  src_dir, &src_dir_u,
 				  dst_dir, &dst_dir_u,
@@ -354,7 +354,7 @@ static void bcachefs_fuse_link(fuse_req_t req, fuse_ino_t ino,
 	fuse_log(FUSE_LOG_DEBUG, "bcachefs_fuse_link(%llu, %llu, %s)\n",
 		 inum.inum, newparent.inum, newname);
 
-	ret = bch2_trans_do(c, NULL, NULL, 0,
+	ret = bch2_trans_commit_do(c, NULL, NULL, 0,
 			    bch2_link_trans(trans, newparent, &dir_u,
 					    inum, &inode_u, &qstr));
 

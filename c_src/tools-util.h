@@ -144,6 +144,8 @@ struct fiemap_extent fiemap_iter_next(struct fiemap_iter *);
 
 char *strcmp_prefix(char *, const char *);
 
+/* Avoid conflicts with libblkid's crc32 function in static builds */
+#define crc32c bch_crc32c
 u32 crc32c(u32, const void *, size_t);
 
 char *dev_to_name(dev_t);

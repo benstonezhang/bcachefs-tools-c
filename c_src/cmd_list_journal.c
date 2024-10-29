@@ -80,15 +80,23 @@ static bool entry_matches_transaction_filter(struct jset_entry *entry,
 }
 
 static bool should_print_transaction(struct jset_entry *entry, struct jset_entry *end,
-				     d_bbpos_range filter)
+				     darray_str msg_filter,
+				     d_bbpos_range key_filter)
 {
-	if (!filter.nr)
+	struct jset_entry_log *l = container_of(entry, struct jset_entry_log, entry);
+	unsigned b = jset_entry_log_msg_bytes(l);
+
+	darray_for_each(msg_filter, i)
+		if (!strncmp(*i, l->d, b))
+			return false;
+
+	if (!key_filter.nr)
 		return true;
 
 	for (entry = vstruct_next(entry);
 	     entry != end && !entry_is_transaction_start(entry);
 	     entry = vstruct_next(entry))
-		if (entry_matches_transaction_filter(entry, filter))
+		if (entry_matches_transaction_filter(entry, key_filter))
 			return true;
 
 	return false;
@@ -112,8 +120,40 @@ static bool should_print_entry(struct jset_entry *entry, d_btree_id filter)
 	return false;
 }
 
+static void journal_entry_header_to_text(struct printbuf *out,
+					 struct bch_fs *c,
+					 struct journal_replay *p, bool blacklisted)
+{
+	if (blacklisted)
+		prt_str(out, "blacklisted ");
+
+	prt_printf(out,
+		   "journal entry     %llu\n"
+		   "  version         %u\n"
+		   "  last seq        %llu\n"
+		   "  flush           %u\n"
+		   "  written at      ",
+		   le64_to_cpu(p->j.seq),
+		   le32_to_cpu(p->j.version),
+		   le64_to_cpu(p->j.last_seq),
+		   !JSET_NO_FLUSH(&p->j));
+	bch2_journal_ptrs_to_text(out, c, p);
+
+	if (blacklisted)
+		star_start_of_lines(out->buf);
+}
+
+static void journal_entry_header_print(struct bch_fs *c, struct journal_replay *p, bool blacklisted)
+{
+	struct printbuf buf = PRINTBUF;
+	journal_entry_header_to_text(&buf, c, p, blacklisted);
+	printf("%s\n", buf.buf);
+	printbuf_exit(&buf);
+}
+
 static void journal_entries_print(struct bch_fs *c, unsigned nr_entries,
-				  d_bbpos_range transaction_filter,
+				  darray_str transaction_msg_filter,
+				  d_bbpos_range transaction_key_filter,
 				  d_btree_id key_filter)
 {
 	struct journal_replay *p, **_p;
@@ -121,6 +161,8 @@ static void journal_entries_print(struct bch_fs *c, unsigned nr_entries,
 	struct printbuf buf = PRINTBUF;
 
 	genradix_for_each(&c->journal_entries, iter, _p) {
+		bool printed_header = false;
+
 		p = *_p;
 		if (!p)
 			continue;
@@ -132,28 +174,10 @@ static void journal_entries_print(struct bch_fs *c, unsigned nr_entries,
 			bch2_journal_seq_is_blacklisted(c,
 					le64_to_cpu(p->j.seq), false);
 
-		if (!transaction_filter.nr) {
-			if (blacklisted)
-				printf("blacklisted ");
-
-			printf("journal entry     %llu\n", le64_to_cpu(p->j.seq));
-
-			printbuf_reset(&buf);
-
-			prt_printf(&buf,
-				   "  version         %u\n"
-				   "  last seq        %llu\n"
-				   "  flush           %u\n"
-				   "  written at      ",
-				   le32_to_cpu(p->j.version),
-				   le64_to_cpu(p->j.last_seq),
-				   !JSET_NO_FLUSH(&p->j));
-			bch2_journal_ptrs_to_text(&buf, c, p);
-
-			if (blacklisted)
-				star_start_of_lines(buf.buf);
-			printf("%s\n", buf.buf);
-			printbuf_reset(&buf);
+		if (!transaction_msg_filter.nr &&
+		    !transaction_key_filter.nr) {
+			journal_entry_header_print(c, p, blacklisted);
+			printed_header = true;
 		}
 
 		struct jset_entry *entry = p->j.start;
@@ -165,7 +189,9 @@ static void journal_entries_print(struct bch_fs *c, unsigned nr_entries,
 			 * commit:
 			 */
 			if (entry_is_transaction_start(entry)) {
-				if (!should_print_transaction(entry, end, transaction_filter)) {
+				if (!should_print_transaction(entry, end,
+							      transaction_msg_filter,
+							      transaction_key_filter)) {
 					do {
 						entry = vstruct_next(entry);
 					} while (entry != end && !entry_is_transaction_start(entry));
@@ -179,7 +205,11 @@ static void journal_entries_print(struct bch_fs *c, unsigned nr_entries,
 			if (!should_print_entry(entry, key_filter))
 				goto next;
 
-			bool highlight = entry_matches_transaction_filter(entry, transaction_filter);
+			if (!printed_header)
+				journal_entry_header_print(c, p, blacklisted);
+			printed_header = true;
+
+			bool highlight = entry_matches_transaction_filter(entry, transaction_key_filter);
 			if (highlight)
 				fputs(RED, stdout);
 
@@ -213,8 +243,9 @@ int cmd_list_journal(int argc, char *argv[])
 	};
 	struct bch_opts opts = bch2_opts_empty();
 	u32 nr_entries = U32_MAX;
-	d_bbpos_range	transaction_filter = { 0 };
-	d_btree_id	key_filter = { 0 };
+	darray_str	transaction_msg_filter = {};
+	d_bbpos_range	transaction_key_filter = {};
+	d_btree_id	key_filter = {};
 	int opt;
 
 	opt_set(opts, noexcl,		true);
@@ -228,7 +259,7 @@ int cmd_list_journal(int argc, char *argv[])
 	opt_set(opts, retain_recovery_info ,true);
 	opt_set(opts, read_journal_only,true);
 
-	while ((opt = getopt_long(argc, argv, "an:t:k:vh",
+	while ((opt = getopt_long(argc, argv, "an:m:t:k:vh",
 				  longopts, NULL)) != -1)
 		switch (opt) {
 		case 'a':
@@ -239,8 +270,11 @@ int cmd_list_journal(int argc, char *argv[])
 				die("error parsing nr_entries");
 			opt_set(opts, read_entire_journal, true);
 			break;
+		case 'm':
+			darray_push(&transaction_msg_filter, strdup(optarg));
+			break;
 		case 't':
-			darray_push(&transaction_filter, bbpos_range_parse(optarg));
+			darray_push(&transaction_key_filter, bbpos_range_parse(optarg));
 			break;
 		case 'k':
 			darray_push(&key_filter, read_string_list_or_die(optarg, __bch2_btree_ids, "btree id"));
@@ -263,7 +297,10 @@ int cmd_list_journal(int argc, char *argv[])
 	if (IS_ERR(c))
 		die("error opening %s: %s", argv[0], bch2_err_str(PTR_ERR(c)));
 
-	journal_entries_print(c, nr_entries, transaction_filter, key_filter);
+	journal_entries_print(c, nr_entries,
+			      transaction_msg_filter,
+			      transaction_key_filter,
+			      key_filter);
 	bch2_fs_stop(c);
 	return 0;
 }

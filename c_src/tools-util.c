@@ -185,6 +185,24 @@ unsigned get_blocksize(int fd)
 /* Open a block device, do magic blkid stuff to probe for existing filesystems: */
 int open_for_format(struct dev_opts *dev, bool force)
 {
+	int blkid_version_code = blkid_get_library_version(NULL, NULL);
+	if (blkid_version_code < 2401) {
+		if (force) {
+			fprintf(
+				stderr,
+				"Continuing with out of date libblkid %s because --force was passed.\n",
+				BLKID_VERSION);
+		} else {
+			// Reference for picking 2.40.1:
+			// https://mirrors.edge.kernel.org/pub/linux/utils/util-linux/v2.40/v2.40.1-ReleaseNotes
+			// https://github.com/util-linux/util-linux/issues/3103
+			die(
+				"Refusing to format when using libblkid %s\n"
+				"libblkid >= 2.40.1 is required to check for existing filesystems\n"
+				"Earlier versions may not recognize some bcachefs filesystems.\n", BLKID_VERSION);
+		}
+	}
+
 	blkid_probe pr;
 	const char *fs_type = NULL, *fs_label = NULL;
 	size_t fs_type_len, fs_label_len;

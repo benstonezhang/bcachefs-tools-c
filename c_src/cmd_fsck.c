@@ -160,6 +160,45 @@ static bool should_use_kernel_fsck(darray_str devs)
 	return ret;
 }
 
+static bool is_blockdev(const char *path)
+{
+	struct stat s;
+	if (stat(path, &s))
+		return true;
+	return S_ISBLK(s.st_mode);
+}
+
+static void loopdev_free(const char *path)
+{
+	char *cmd = mprintf("losetup -d %s", path);
+	system(cmd);
+	free(cmd);
+}
+
+static char *loopdev_alloc(const char *path)
+{
+	char *cmd = mprintf("losetup --show -f %s", path);
+	FILE *f = popen(cmd, "r");
+	free(cmd);
+	if (!f) {
+		fprintf(stderr, "error executing losetup: %m\n");
+		return NULL;
+	}
+
+	char *line = NULL;
+	size_t n = 0;
+	getline(&line, &n, f);
+	int ret = pclose(f);
+	if (ret) {
+		fprintf(stderr, "error executing losetup: %i\n", ret);
+		free(line);
+		return NULL;
+	}
+
+	strim(line);
+	return line;
+}
+
 int cmd_fsck(int argc, char *argv[])
 {
 	static const struct option longopts[] = {
@@ -183,7 +222,7 @@ int cmd_fsck(int argc, char *argv[])
 	append_opt(&opts_str, "read_only");
 
 	while ((opt = getopt_long(argc, argv,
-				  "apynfo:rRkvh",
+				  "apynfo:rRkKvh",
 				  longopts, NULL)) != -1)
 		switch (opt) {
 		case 'a': /* outdated alias for -p */
@@ -243,18 +282,34 @@ int cmd_fsck(int argc, char *argv[])
 	struct printbuf parse_later = PRINTBUF;
 
 	if (kernel_probed) {
+		darray_str loopdevs = {};
+		int fsck_fd = -1;
+
 		printf("Running in-kernel offline fsck\n");
-		struct bch_ioctl_fsck_offline *fsck = calloc(sizeof(*fsck) +
-							     sizeof(u64) * devs.nr, 1);
+		struct bch_ioctl_fsck_offline *fsck = calloc(sizeof(*fsck) + sizeof(u64) * devs.nr, 1);
 
 		fsck->opts = (unsigned long)opts_str.buf;
-		darray_for_each(devs, i)
-			fsck->devs[i - devs.data] = (unsigned long) *i;
+		darray_for_each(devs, i) {
+			if (is_blockdev(*i)) {
+				fsck->devs[i - devs.data] = (unsigned long) *i;
+			} else {
+				char *l = loopdev_alloc(*i);
+				if (!l)
+					goto kernel_fsck_err;
+				darray_push(&loopdevs, l);
+				fsck->devs[i - devs.data] = (unsigned long) l;
+			}
+		}
 		fsck->nr_devs = devs.nr;
 
 		int ctl_fd = bcachectl_open();
-		int fsck_fd = ioctl(ctl_fd, BCH_IOCTL_FSCK_OFFLINE, fsck);
+		fsck_fd = ioctl(ctl_fd, BCH_IOCTL_FSCK_OFFLINE, fsck);
+kernel_fsck_err:
 		free(fsck);
+
+		darray_for_each(loopdevs, i)
+			loopdev_free(*i);
+		darray_exit(&loopdevs);
 
 		if (fsck_fd < 0 && kernel < 0)
 			goto userland_fsck;
