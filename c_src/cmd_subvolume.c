@@ -74,6 +74,7 @@ int cmd_subvolume_create(int argc, char *argv[])
 
 		xioctl(fs.ioctl_fd, BCH_IOCTL_SUBVOLUME_CREATE, &i);
 		bcache_fs_close(fs);
+        free(dir);
 	}
 
 	return 0;
@@ -120,6 +121,7 @@ int cmd_subvolume_delete(int argc, char *argv[])
 
 		xioctl(fs.ioctl_fd, BCH_IOCTL_SUBVOLUME_DESTROY, &i);
 		bcache_fs_close(fs);
+        free(dir);
 	}
 
 	return 0;
@@ -184,5 +186,6 @@ int cmd_subvolume_snapshot(int argc, char *argv[])
 
 	xioctl(fs.ioctl_fd, BCH_IOCTL_SUBVOLUME_CREATE, &i);
 	bcache_fs_close(fs);
-	return 0;
+    free(dir);
+    return 0;
 }
