@@ -8,6 +8,7 @@ License:        GPLv2
 URL:            https://github.com/koverstreet/bcachefs-tools
 
 BuildRequires:  gcc
+BuildRequires:  gdb-headless
 BuildRequires:  make
 BuildRequires:  clang-devel
 BuildRequires:  keyutils-libs-devel
