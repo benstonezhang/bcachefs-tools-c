@@ -1222,9 +1222,9 @@ int cmd_fusemount(int argc, char *argv[])
 		goto out;
 	}
 	if (fuse_opts.show_version) {
-		/* TODO: Show bcachefs version. */
 		printf("FUSE library version %s\n", fuse_pkgversion());
 		fuse_lowlevel_version();
+		printf("bcachefs version: %s\n", VERSION_STRING);
 		ret = 0;
 		goto out;
 	}
