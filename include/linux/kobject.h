@@ -20,6 +20,7 @@
 #include <linux/bug.h>
 #include <linux/compiler.h>
 #include <linux/kernel.h>
+#include <linux/slab.h>
 #include <linux/sysfs.h>
 #include <linux/types.h>
 #include <linux/workqueue.h>

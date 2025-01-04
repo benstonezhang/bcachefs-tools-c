@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 
 #include "bcachefs.h"
+#include "bkey_buf.h"
 #include "bkey_methods.h"
 #include "bkey_sort.h"
 #include "btree_cache.h"
@@ -26,7 +27,7 @@
 static void bch2_btree_node_header_to_text(struct printbuf *out, struct btree_node *bn)
 {
 	bch2_btree_id_level_to_text(out, BTREE_NODE_ID(bn), BTREE_NODE_LEVEL(bn));
-	prt_printf(out, " seq %llux\n", bn->keys.seq);
+	prt_printf(out, " seq %llx %llu\n", bn->keys.seq, BTREE_NODE_SEQ(bn));
 	prt_str(out, "min: ");
 	bch2_bpos_to_text(out, bn->min_key);
 	prt_newline(out);
@@ -489,8 +490,8 @@ void bch2_btree_init_next(struct btree_trans *trans, struct btree *b)
 	if (b->nsets == MAX_BSETS &&
 	    !btree_node_write_in_flight(b) &&
 	    should_compact_all(c, b)) {
-		bch2_btree_node_write(c, b, SIX_LOCK_write,
-				      BTREE_WRITE_init_next_bset);
+		bch2_btree_node_write_trans(trans, b, SIX_LOCK_write,
+					    BTREE_WRITE_init_next_bset);
 		reinit_iter = true;
 	}
 
@@ -732,11 +733,8 @@ static int validate_bset(struct bch_fs *c, struct bch_dev *ca,
 			 c, ca, b, i, NULL,
 			 bset_past_end_of_btree_node,
 			 "bset past end of btree node (offset %u len %u but written %zu)",
-			 offset, sectors, ptr_written ?: btree_sectors(c))) {
+			 offset, sectors, ptr_written ?: btree_sectors(c)))
 		i->u64s = 0;
-		ret = 0;
-		goto out;
-	}
 
 	btree_err_on(offset && !i->u64s,
 		     -BCH_ERR_btree_node_read_err_fixable,
@@ -828,20 +826,38 @@ static int validate_bset(struct bch_fs *c, struct bch_dev *ca,
 			       BSET_BIG_ENDIAN(i), write,
 			       &bn->format);
 	}
-out:
 fsck_err:
 	printbuf_exit(&buf2);
 	printbuf_exit(&buf1);
 	return ret;
 }
 
+static int btree_node_bkey_val_validate(struct bch_fs *c, struct btree *b,
+					struct bkey_s_c k,
+					enum bch_validate_flags flags)
+{
+	return bch2_bkey_val_validate(c, k, (struct bkey_validate_context) {
+		.from	= BKEY_VALIDATE_btree_node,
+		.level	= b->c.level,
+		.btree	= b->c.btree_id,
+		.flags	= flags
+	});
+}
+
 static int bset_key_validate(struct bch_fs *c, struct btree *b,
 			     struct bkey_s_c k,
-			     bool updated_range, int rw)
+			     bool updated_range,
+			     enum bch_validate_flags flags)
 {
-	return __bch2_bkey_validate(c, k, btree_node_type(b), 0) ?:
-		(!updated_range ? bch2_bkey_in_btree_node(c, b, k, 0) : 0) ?:
-		(rw == WRITE ? bch2_bkey_val_validate(c, k, 0) : 0);
+	struct bkey_validate_context from = (struct bkey_validate_context) {
+		.from	= BKEY_VALIDATE_btree_node,
+		.level	= b->c.level,
+		.btree	= b->c.btree_id,
+		.flags	= flags,
+	};
+	return __bch2_bkey_validate(c, k, from) ?:
+		(!updated_range ? bch2_bkey_in_btree_node(c, b, k, from) : 0) ?:
+		(flags & BCH_VALIDATE_write ? btree_node_bkey_val_validate(c, b, k, flags) : 0);
 }
 
 static bool bkey_packed_valid(struct bch_fs *c, struct btree *b,
@@ -858,7 +874,21 @@ static bool bkey_packed_valid(struct bch_fs *c, struct btree *b,
 
 	struct bkey tmp;
 	struct bkey_s u = __bkey_disassemble(b, k, &tmp);
-	return !__bch2_bkey_validate(c, u.s_c, btree_node_type(b), BCH_VALIDATE_silent);
+	return !__bch2_bkey_validate(c, u.s_c,
+				     (struct bkey_validate_context) {
+					.from	= BKEY_VALIDATE_btree_node,
+					.level	= b->c.level,
+					.btree	= b->c.btree_id,
+					.flags	= BCH_VALIDATE_silent
+				     });
+}
+
+static inline int btree_node_read_bkey_cmp(const struct btree *b,
+				const struct bkey_packed *l,
+				const struct bkey_packed *r)
+{
+	return bch2_bkey_cmp_packed(b, l, r)
+		?: (int) bkey_deleted(r) - (int) bkey_deleted(l);
 }
 
 static int validate_bset_keys(struct bch_fs *c, struct btree *b,
@@ -921,7 +951,7 @@ static int validate_bset_keys(struct bch_fs *c, struct btree *b,
 				    BSET_BIG_ENDIAN(i), write,
 				    &b->format, k);
 
-		if (prev && bkey_iter_cmp(b, prev, k) > 0) {
+		if (prev && btree_node_read_bkey_cmp(b, prev, k) >= 0) {
 			struct bkey up = bkey_unpack_key(b, prev);
 
 			printbuf_reset(&buf);
@@ -968,6 +998,7 @@ drop_this_key:
 got_good_key:
 		le16_add_cpu(&i->u64s, -next_good_key);
 		memmove_u64s_down(k, bkey_p_next(k), (u64 *) vstruct_end(i) - (u64 *) k);
+		set_btree_node_need_rewrite(b);
 	}
 fsck_err:
 	printbuf_exit(&buf);
@@ -1041,39 +1072,51 @@ int bch2_btree_node_read_done(struct bch_fs *c, struct bch_dev *ca,
 
 	while (b->written < (ptr_written ?: btree_sectors(c))) {
 		unsigned sectors;
-		struct nonce nonce;
 		bool first = !b->written;
-		bool csum_bad;
 
-		if (!b->written) {
+		if (first) {
+			bne = NULL;
 			i = &b->data->keys;
+		} else {
+			bne = write_block(b);
+			i = &bne->keys;
 
-			btree_err_on(!bch2_checksum_type_valid(c, BSET_CSUM_TYPE(i)),
-				     -BCH_ERR_btree_node_read_err_want_retry,
-				     c, ca, b, i, NULL,
-				     bset_unknown_csum,
-				     "unknown checksum type %llu", BSET_CSUM_TYPE(i));
+			if (i->seq != b->data->keys.seq)
+				break;
+		}
 
-			nonce = btree_nonce(i, b->written << 9);
+		struct nonce nonce = btree_nonce(i, b->written << 9);
+		bool good_csum_type = bch2_checksum_type_valid(c, BSET_CSUM_TYPE(i));
 
-			struct bch_csum csum = csum_vstruct(c, BSET_CSUM_TYPE(i), nonce, b->data);
-			csum_bad = bch2_crc_cmp(b->data->csum, csum);
-			if (csum_bad)
-				bch2_io_error(ca, BCH_MEMBER_ERROR_checksum);
+		btree_err_on(!good_csum_type,
+			     bch2_csum_type_is_encryption(BSET_CSUM_TYPE(i))
+			     ? -BCH_ERR_btree_node_read_err_must_retry
+			     : -BCH_ERR_btree_node_read_err_want_retry,
+			     c, ca, b, i, NULL,
+			     bset_unknown_csum,
+			     "unknown checksum type %llu", BSET_CSUM_TYPE(i));
 
-			btree_err_on(csum_bad,
-				     -BCH_ERR_btree_node_read_err_want_retry,
-				     c, ca, b, i, NULL,
-				     bset_bad_csum,
-				     "%s",
-				     (printbuf_reset(&buf),
-				      bch2_csum_err_msg(&buf, BSET_CSUM_TYPE(i), b->data->csum, csum),
-				      buf.buf));
+		if (first) {
+			if (good_csum_type) {
+				struct bch_csum csum = csum_vstruct(c, BSET_CSUM_TYPE(i), nonce, b->data);
+				bool csum_bad = bch2_crc_cmp(b->data->csum, csum);
+				if (csum_bad)
+					bch2_io_error(ca, BCH_MEMBER_ERROR_checksum);
 
-			ret = bset_encrypt(c, i, b->written << 9);
-			if (bch2_fs_fatal_err_on(ret, c,
-					"decrypting btree node: %s", bch2_err_str(ret)))
-				goto fsck_err;
+				btree_err_on(csum_bad,
+					     -BCH_ERR_btree_node_read_err_want_retry,
+					     c, ca, b, i, NULL,
+					     bset_bad_csum,
+					     "%s",
+					     (printbuf_reset(&buf),
+					      bch2_csum_err_msg(&buf, BSET_CSUM_TYPE(i), b->data->csum, csum),
+					      buf.buf));
+
+				ret = bset_encrypt(c, i, b->written << 9);
+				if (bch2_fs_fatal_err_on(ret, c,
+							 "decrypting btree node: %s", bch2_err_str(ret)))
+					goto fsck_err;
+			}
 
 			btree_err_on(btree_node_type_is_extents(btree_node_type(b)) &&
 				     !BTREE_NODE_NEW_EXTENT_OVERWRITE(b->data),
@@ -1084,37 +1127,26 @@ int bch2_btree_node_read_done(struct bch_fs *c, struct bch_dev *ca,
 
 			sectors = vstruct_sectors(b->data, c->block_bits);
 		} else {
-			bne = write_block(b);
-			i = &bne->keys;
+			if (good_csum_type) {
+				struct bch_csum csum = csum_vstruct(c, BSET_CSUM_TYPE(i), nonce, bne);
+				bool csum_bad = bch2_crc_cmp(bne->csum, csum);
+				if (ca && csum_bad)
+					bch2_io_error(ca, BCH_MEMBER_ERROR_checksum);
 
-			if (i->seq != b->data->keys.seq)
-				break;
+				btree_err_on(csum_bad,
+					     -BCH_ERR_btree_node_read_err_want_retry,
+					     c, ca, b, i, NULL,
+					     bset_bad_csum,
+					     "%s",
+					     (printbuf_reset(&buf),
+					      bch2_csum_err_msg(&buf, BSET_CSUM_TYPE(i), bne->csum, csum),
+					      buf.buf));
 
-			btree_err_on(!bch2_checksum_type_valid(c, BSET_CSUM_TYPE(i)),
-				     -BCH_ERR_btree_node_read_err_want_retry,
-				     c, ca, b, i, NULL,
-				     bset_unknown_csum,
-				     "unknown checksum type %llu", BSET_CSUM_TYPE(i));
-
-			nonce = btree_nonce(i, b->written << 9);
-			struct bch_csum csum = csum_vstruct(c, BSET_CSUM_TYPE(i), nonce, bne);
-			csum_bad = bch2_crc_cmp(bne->csum, csum);
-			if (ca && csum_bad)
-				bch2_io_error(ca, BCH_MEMBER_ERROR_checksum);
-
-			btree_err_on(csum_bad,
-				     -BCH_ERR_btree_node_read_err_want_retry,
-				     c, ca, b, i, NULL,
-				     bset_bad_csum,
-				     "%s",
-				     (printbuf_reset(&buf),
-				      bch2_csum_err_msg(&buf, BSET_CSUM_TYPE(i), bne->csum, csum),
-				      buf.buf));
-
-			ret = bset_encrypt(c, i, b->written << 9);
-			if (bch2_fs_fatal_err_on(ret, c,
-					"decrypting btree node: %s", bch2_err_str(ret)))
-				goto fsck_err;
+				ret = bset_encrypt(c, i, b->written << 9);
+				if (bch2_fs_fatal_err_on(ret, c,
+						"decrypting btree node: %s", bch2_err_str(ret)))
+					goto fsck_err;
+			}
 
 			sectors = vstruct_sectors(bne, c->block_bits);
 		}
@@ -1219,7 +1251,7 @@ int bch2_btree_node_read_done(struct bch_fs *c, struct bch_dev *ca,
 		struct bkey tmp;
 		struct bkey_s u = __bkey_disassemble(b, k, &tmp);
 
-		ret = bch2_bkey_val_validate(c, u.s_c, READ);
+		ret = btree_node_bkey_val_validate(c, b, u.s_c, READ);
 		if (ret == -BCH_ERR_fsck_delete_bkey ||
 		    (bch2_inject_invalid_keys &&
 		     !bversion_cmp(u.k->bversion, MAX_VERSION))) {
@@ -1229,6 +1261,7 @@ int bch2_btree_node_read_done(struct bch_fs *c, struct bch_dev *ca,
 			memmove_u64s_down(k, bkey_p_next(k),
 					  (u64 *) vstruct_end(i) - (u64 *) k);
 			set_btree_bset_end(b, b->set);
+			set_btree_node_need_rewrite(b);
 			continue;
 		}
 		if (ret)
@@ -1320,7 +1353,7 @@ start:
 
 		can_retry = bch2_bkey_pick_read_device(c,
 				bkey_i_to_s_c(&b->key),
-				&failed, &rb->pick) > 0;
+				&failed, &rb->pick, -1) > 0;
 
 		if (!bio->bi_status &&
 		    !bch2_btree_node_read_done(c, ca, b, can_retry, &saw_error)) {
@@ -1342,15 +1375,18 @@ start:
 			       rb->start_time);
 	bio_put(&rb->bio);
 
-	if (saw_error &&
+	if ((saw_error ||
+	     btree_node_need_rewrite(b)) &&
 	    !btree_node_read_error(b) &&
 	    c->curr_recovery_pass != BCH_RECOVERY_PASS_scan_for_btree_nodes) {
-		printbuf_reset(&buf);
-		bch2_btree_id_level_to_text(&buf, b->c.btree_id, b->c.level);
-		prt_str(&buf, " ");
-		bch2_bkey_val_to_text(&buf, c, bkey_i_to_s_c(&b->key));
-		bch_err_ratelimited(c, "%s: rewriting btree node at due to error\n  %s",
-				    __func__, buf.buf);
+		if (saw_error) {
+			printbuf_reset(&buf);
+			bch2_btree_id_level_to_text(&buf, b->c.btree_id, b->c.level);
+			prt_str(&buf, " ");
+			bch2_bkey_val_to_text(&buf, c, bkey_i_to_s_c(&b->key));
+			bch_err_ratelimited(c, "%s: rewriting btree node at due to error\n  %s",
+					    __func__, buf.buf);
+		}
 
 		bch2_btree_node_rewrite_async(c, b);
 	}
@@ -1662,7 +1698,7 @@ void bch2_btree_node_read(struct btree_trans *trans, struct btree *b,
 		return;
 
 	ret = bch2_bkey_pick_read_device(c, bkey_i_to_s_c(&b->key),
-					 NULL, &pick);
+					 NULL, &pick, -1);
 
 	if (ret <= 0) {
 		struct printbuf buf = PRINTBUF;
@@ -1774,6 +1810,190 @@ int bch2_btree_root_read(struct bch_fs *c, enum btree_id id,
 			const struct bkey_i *k, unsigned level)
 {
 	return bch2_trans_run(c, __bch2_btree_root_read(trans, id, k, level));
+}
+
+struct btree_node_scrub {
+	struct bch_fs		*c;
+	struct bch_dev		*ca;
+	void			*buf;
+	bool			used_mempool;
+	unsigned		written;
+
+	enum btree_id		btree;
+	unsigned		level;
+	struct bkey_buf		key;
+	__le64			seq;
+
+	struct work_struct	work;
+	struct bio		bio;
+};
+
+static bool btree_node_scrub_check(struct bch_fs *c, struct btree_node *data, unsigned ptr_written,
+				   struct printbuf *err)
+{
+	unsigned written = 0;
+
+	if (le64_to_cpu(data->magic) != bset_magic(c)) {
+		prt_printf(err, "bad magic: want %llx, got %llx",
+			   bset_magic(c), le64_to_cpu(data->magic));
+		return false;
+	}
+
+	while (written < (ptr_written ?: btree_sectors(c))) {
+		struct btree_node_entry *bne;
+		struct bset *i;
+		bool first = !written;
+
+		if (first) {
+			bne = NULL;
+			i = &data->keys;
+		} else {
+			bne = (void *) data + (written << 9);
+			i = &bne->keys;
+
+			if (!ptr_written && i->seq != data->keys.seq)
+				break;
+		}
+
+		struct nonce nonce = btree_nonce(i, written << 9);
+		bool good_csum_type = bch2_checksum_type_valid(c, BSET_CSUM_TYPE(i));
+
+		if (first) {
+			if (good_csum_type) {
+				struct bch_csum csum = csum_vstruct(c, BSET_CSUM_TYPE(i), nonce, data);
+				if (bch2_crc_cmp(data->csum, csum)) {
+					bch2_csum_err_msg(err, BSET_CSUM_TYPE(i), data->csum, csum);
+					return false;
+				}
+			}
+
+			written += vstruct_sectors(data, c->block_bits);
+		} else {
+			if (good_csum_type) {
+				struct bch_csum csum = csum_vstruct(c, BSET_CSUM_TYPE(i), nonce, bne);
+				if (bch2_crc_cmp(bne->csum, csum)) {
+					bch2_csum_err_msg(err, BSET_CSUM_TYPE(i), bne->csum, csum);
+					return false;
+				}
+			}
+
+			written += vstruct_sectors(bne, c->block_bits);
+		}
+	}
+
+	return true;
+}
+
+static void btree_node_scrub_work(struct work_struct *work)
+{
+	struct btree_node_scrub *scrub = container_of(work, struct btree_node_scrub, work);
+	struct bch_fs *c = scrub->c;
+	struct printbuf err = PRINTBUF;
+
+	__bch2_btree_pos_to_text(&err, c, scrub->btree, scrub->level,
+				 bkey_i_to_s_c(scrub->key.k));
+	prt_newline(&err);
+
+	if (!btree_node_scrub_check(c, scrub->buf, scrub->written, &err)) {
+		struct btree_trans *trans = bch2_trans_get(c);
+
+		struct btree_iter iter;
+		bch2_trans_node_iter_init(trans, &iter, scrub->btree,
+					  scrub->key.k->k.p, 0, scrub->level - 1, 0);
+
+		struct btree *b;
+		int ret = lockrestart_do(trans, PTR_ERR_OR_ZERO(b = bch2_btree_iter_peek_node(&iter)));
+		if (ret)
+			goto err;
+
+		if (bkey_i_to_btree_ptr_v2(&b->key)->v.seq == scrub->seq) {
+			bch_err(c, "error validating btree node during scrub on %s at btree %s",
+				scrub->ca->name, err.buf);
+
+			ret = bch2_btree_node_rewrite(trans, &iter, b, 0);
+		}
+err:
+		bch2_trans_iter_exit(trans, &iter);
+		bch2_trans_begin(trans);
+		bch2_trans_put(trans);
+	}
+
+	printbuf_exit(&err);
+	bch2_bkey_buf_exit(&scrub->key, c);;
+	btree_bounce_free(c, c->opts.btree_node_size, scrub->used_mempool, scrub->buf);
+	percpu_ref_put(&scrub->ca->io_ref);
+	kfree(scrub);
+	bch2_write_ref_put(c, BCH_WRITE_REF_btree_node_scrub);
+}
+
+static void btree_node_scrub_endio(struct bio *bio)
+{
+	struct btree_node_scrub *scrub = container_of(bio, struct btree_node_scrub, bio);
+
+	queue_work(scrub->c->btree_read_complete_wq, &scrub->work);
+}
+
+int bch2_btree_node_scrub(struct btree_trans *trans,
+			  enum btree_id btree, unsigned level,
+			  struct bkey_s_c k, unsigned dev)
+{
+	if (k.k->type != KEY_TYPE_btree_ptr_v2)
+		return 0;
+
+	struct bch_fs *c = trans->c;
+
+	if (!bch2_write_ref_tryget(c, BCH_WRITE_REF_btree_node_scrub))
+		return -BCH_ERR_erofs_no_writes;
+
+	struct extent_ptr_decoded pick;
+	int ret = bch2_bkey_pick_read_device(c, k, NULL, &pick, dev);
+	if (ret <= 0)
+		goto err;
+
+	struct bch_dev *ca = bch2_dev_get_ioref(c, pick.ptr.dev, READ);
+	if (!ca) {
+		ret = -BCH_ERR_device_offline;
+		goto err;
+	}
+
+	bool used_mempool = false;
+	void *buf = btree_bounce_alloc(c, c->opts.btree_node_size, &used_mempool);
+
+	unsigned vecs = buf_pages(buf, c->opts.btree_node_size);
+
+	struct btree_node_scrub *scrub =
+		kzalloc(sizeof(*scrub) + sizeof(struct bio_vec) * vecs, GFP_KERNEL);
+	if (!scrub) {
+		ret = -ENOMEM;
+		goto err_free;
+	}
+
+	scrub->c		= c;
+	scrub->ca		= ca;
+	scrub->buf		= buf;
+	scrub->used_mempool	= used_mempool;
+	scrub->written		= btree_ptr_sectors_written(k);
+
+	scrub->btree		= btree;
+	scrub->level		= level;
+	bch2_bkey_buf_init(&scrub->key);
+	bch2_bkey_buf_reassemble(&scrub->key, c, k);
+	scrub->seq		= bkey_s_c_to_btree_ptr_v2(k).v->seq;
+
+	INIT_WORK(&scrub->work, btree_node_scrub_work);
+
+	bio_init(&scrub->bio, ca->disk_sb.bdev, scrub->bio.bi_inline_vecs, vecs, REQ_OP_READ);
+	bch2_bio_map(&scrub->bio, scrub->buf, c->opts.btree_node_size);
+	scrub->bio.bi_iter.bi_sector	= pick.ptr.offset;
+	scrub->bio.bi_end_io		= btree_node_scrub_endio;
+	submit_bio(&scrub->bio);
+	return 0;
+err_free:
+	btree_bounce_free(c, c->opts.btree_node_size, used_mempool, buf);
+	percpu_ref_put(&ca->io_ref);
+err:
+	bch2_write_ref_put(c, BCH_WRITE_REF_btree_node_scrub);
+	return ret;
 }
 
 static void bch2_btree_complete_write(struct bch_fs *c, struct btree *b,
@@ -1938,7 +2158,12 @@ static int validate_bset_for_write(struct bch_fs *c, struct btree *b,
 	bool saw_error;
 
 	int ret = bch2_bkey_validate(c, bkey_i_to_s_c(&b->key),
-				     BKEY_TYPE_btree, WRITE);
+				     (struct bkey_validate_context) {
+					.from	= BKEY_VALIDATE_btree_node,
+					.level	= b->c.level + 1,
+					.btree	= b->c.btree_id,
+					.flags	= BCH_VALIDATE_write,
+				     });
 	if (ret) {
 		bch2_fs_inconsistent(c, "invalid btree node key before write");
 		return ret;
@@ -2293,6 +2518,34 @@ void bch2_btree_node_write(struct bch_fs *c, struct btree *b,
 		    six_trylock_write(&b->c.lock)) {
 			bch2_btree_post_write_cleanup(c, b);
 			six_unlock_write(&b->c.lock);
+		}
+
+		if (lock_type_held == SIX_LOCK_read)
+			six_lock_downgrade(&b->c.lock);
+	} else {
+		__bch2_btree_node_write(c, b, flags);
+		if (lock_type_held == SIX_LOCK_write &&
+		    btree_node_just_written(b))
+			bch2_btree_post_write_cleanup(c, b);
+	}
+}
+
+void bch2_btree_node_write_trans(struct btree_trans *trans, struct btree *b,
+				 enum six_lock_type lock_type_held,
+				 unsigned flags)
+{
+	struct bch_fs *c = trans->c;
+
+	if (lock_type_held == SIX_LOCK_intent ||
+	    (lock_type_held == SIX_LOCK_read &&
+	     six_lock_tryupgrade(&b->c.lock))) {
+		__bch2_btree_node_write(c, b, flags);
+
+		/* don't cycle lock unnecessarily: */
+		if (btree_node_just_written(b) &&
+		    six_trylock_write(&b->c.lock)) {
+			bch2_btree_post_write_cleanup(c, b);
+			__bch2_btree_node_unlock_write(trans, b);
 		}
 
 		if (lock_type_held == SIX_LOCK_read)

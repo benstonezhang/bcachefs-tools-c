@@ -103,6 +103,8 @@ static inline void *kmalloc_array(size_t n, size_t size, gfp_t flags)
 	((size) != 0 && (n) > SIZE_MAX / (size)				\
 	 ? NULL : kmalloc((n) * (size), flags))
 
+#define kvcalloc(n, size, flags)	kvmalloc_array(n, size, flags|__GFP_ZERO)
+
 #define kvmalloc_array_noprof(...)	kvmalloc_array(__VA_ARGS__)
 
 #define kcalloc(n, size, flags)		kmalloc_array(n, size, flags|__GFP_ZERO)

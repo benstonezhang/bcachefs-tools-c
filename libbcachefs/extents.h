@@ -8,7 +8,6 @@
 
 struct bch_fs;
 struct btree_trans;
-enum bch_validate_flags;
 
 /* extent entries: */
 
@@ -405,17 +404,17 @@ void bch2_mark_io_failure(struct bch_io_failures *,
 			  struct extent_ptr_decoded *);
 int bch2_bkey_pick_read_device(struct bch_fs *, struct bkey_s_c,
 			       struct bch_io_failures *,
-			       struct extent_ptr_decoded *);
+			       struct extent_ptr_decoded *, int);
 
 /* KEY_TYPE_btree_ptr: */
 
 int bch2_btree_ptr_validate(struct bch_fs *, struct bkey_s_c,
-			    enum bch_validate_flags);
+			    struct bkey_validate_context);
 void bch2_btree_ptr_to_text(struct printbuf *, struct bch_fs *,
 			    struct bkey_s_c);
 
 int bch2_btree_ptr_v2_validate(struct bch_fs *, struct bkey_s_c,
-			       enum bch_validate_flags);
+			       struct bkey_validate_context);
 void bch2_btree_ptr_v2_to_text(struct printbuf *, struct bch_fs *, struct bkey_s_c);
 void bch2_btree_ptr_v2_compat(enum btree_id, unsigned, unsigned,
 			      int, struct bkey_s);
@@ -452,7 +451,7 @@ bool bch2_extent_merge(struct bch_fs *, struct bkey_s, struct bkey_s_c);
 /* KEY_TYPE_reservation: */
 
 int bch2_reservation_validate(struct bch_fs *, struct bkey_s_c,
-			      enum bch_validate_flags);
+			      struct bkey_validate_context);
 void bch2_reservation_to_text(struct printbuf *, struct bch_fs *, struct bkey_s_c);
 bool bch2_reservation_merge(struct bch_fs *, struct bkey_s, struct bkey_s_c);
 
@@ -686,14 +685,17 @@ bool bch2_extents_match(struct bkey_s_c, struct bkey_s_c);
 struct bch_extent_ptr *
 bch2_extent_has_ptr(struct bkey_s_c, struct extent_ptr_decoded, struct bkey_s);
 
-void bch2_extent_ptr_set_cached(struct bkey_s, struct bch_extent_ptr *);
+void bch2_extent_ptr_set_cached(struct bch_fs *, struct bch_io_opts *,
+				struct bkey_s, struct bch_extent_ptr *);
 
+bool bch2_extent_normalize_by_opts(struct bch_fs *, struct bch_io_opts *, struct bkey_s);
 bool bch2_extent_normalize(struct bch_fs *, struct bkey_s);
+
 void bch2_extent_ptr_to_text(struct printbuf *out, struct bch_fs *, const struct bch_extent_ptr *);
 void bch2_bkey_ptrs_to_text(struct printbuf *, struct bch_fs *,
 			    struct bkey_s_c);
 int bch2_bkey_ptrs_validate(struct bch_fs *, struct bkey_s_c,
-			    enum bch_validate_flags);
+			    struct bkey_validate_context);
 
 static inline bool bch2_extent_ptr_eq(struct bch_extent_ptr ptr1,
 				      struct bch_extent_ptr ptr2)
@@ -706,15 +708,6 @@ static inline bool bch2_extent_ptr_eq(struct bch_extent_ptr ptr1,
 }
 
 void bch2_ptr_swab(struct bkey_s);
-
-const struct bch_extent_rebalance *bch2_bkey_rebalance_opts(struct bkey_s_c);
-unsigned bch2_bkey_ptrs_need_rebalance(struct bch_fs *, struct bkey_s_c,
-				       unsigned, unsigned);
-bool bch2_bkey_needs_rebalance(struct bch_fs *, struct bkey_s_c);
-u64 bch2_bkey_sectors_need_rebalance(struct bch_fs *, struct bkey_s_c);
-
-int bch2_bkey_set_needs_rebalance(struct bch_fs *, struct bkey_i *,
-				  struct bch_io_opts *);
 
 /* Generic extent code: */
 

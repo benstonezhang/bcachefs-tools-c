@@ -91,7 +91,7 @@ Add default superblock, after bcachefs migrate
 .El
 .Ss Commands for operating on files in a bcachefs filesystem
 .Bl -tag -width 18n -compact
-.It Ic setattr
+.It Ic set-file-option
 Set various per file attributes
 .El
 .Ss Commands for debugging
@@ -574,7 +574,7 @@ Offset of existing superblock
 .El
 .Sh Commands for operating on files in a bcachefs filesystem
 .Bl -tag -width Ds
-.It Nm Ic setattr Oo Ar options Oc Ar devices\ ...
+.It Nm Ic set-file-option Oo Ar options Oc Ar devices\ ...
 .Bl -tag -width Ds
 .It Fl -data_replicas Ns = Ns Ar number
 Number of data replicas

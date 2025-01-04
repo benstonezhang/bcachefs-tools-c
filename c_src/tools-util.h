@@ -179,6 +179,8 @@ struct bbpos_range {
 
 struct bbpos_range bbpos_range_parse(char *);
 
+unsigned version_parse(char *);
+
 darray_str get_or_split_cmdline_devs(int argc, char *argv[]);
 
 #endif /* _TOOLS_UTIL_H */

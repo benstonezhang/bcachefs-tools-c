@@ -81,7 +81,16 @@
 	  BCH_FSCK_ERR_accounting_mismatch)			\
 	x(inode_has_child_snapshots,				\
 	  BIT_ULL(BCH_RECOVERY_PASS_check_inodes),		\
-	  BCH_FSCK_ERR_inode_has_child_snapshots_wrong)
+	  BCH_FSCK_ERR_inode_has_child_snapshots_wrong)		\
+	x(backpointer_bucket_gen,				\
+	  BIT_ULL(BCH_RECOVERY_PASS_check_extents_to_backpointers),\
+	  BCH_FSCK_ERR_backpointer_to_missing_ptr,		\
+	  BCH_FSCK_ERR_ptr_to_missing_backpointer)		\
+	x(disk_accounting_big_endian,				\
+	  BIT_ULL(BCH_RECOVERY_PASS_check_allocations),		\
+	  BCH_FSCK_ERR_accounting_mismatch,			\
+	  BCH_FSCK_ERR_accounting_key_replicas_nr_devs_0,	\
+	  BCH_FSCK_ERR_accounting_key_junk_at_end)
 
 #define DOWNGRADE_TABLE()					\
 	x(bucket_stripe_sectors,				\
@@ -117,7 +126,19 @@
 	  BCH_FSCK_ERR_bkey_version_in_future)			\
 	x(rebalance_work_acct_fix,				\
 	  BIT_ULL(BCH_RECOVERY_PASS_check_allocations),		\
-	  BCH_FSCK_ERR_accounting_mismatch)
+	  BCH_FSCK_ERR_accounting_mismatch,			\
+	  BCH_FSCK_ERR_accounting_key_replicas_nr_devs_0,	\
+	  BCH_FSCK_ERR_accounting_key_junk_at_end)		\
+	x(backpointer_bucket_gen,				\
+	  BIT_ULL(BCH_RECOVERY_PASS_check_extents_to_backpointers),\
+	  BCH_FSCK_ERR_backpointer_bucket_offset_wrong,		\
+	  BCH_FSCK_ERR_backpointer_to_missing_ptr,		\
+	  BCH_FSCK_ERR_ptr_to_missing_backpointer)		\
+	x(disk_accounting_big_endian,				\
+	  BIT_ULL(BCH_RECOVERY_PASS_check_allocations),		\
+	  BCH_FSCK_ERR_accounting_mismatch,			\
+	  BCH_FSCK_ERR_accounting_key_replicas_nr_devs_0,	\
+	  BCH_FSCK_ERR_accounting_key_junk_at_end)
 
 struct upgrade_downgrade_entry {
 	u64		recovery_passes;
@@ -143,6 +164,9 @@ UPGRADE_TABLE()
 
 static int have_stripes(struct bch_fs *c)
 {
+	if (IS_ERR_OR_NULL(c->btree_roots_known[BTREE_ID_stripes].b))
+		return 0;
+
 	return !btree_node_fake(c->btree_roots_known[BTREE_ID_stripes].b);
 }
 

@@ -6,6 +6,7 @@
 #define __LINUX_BLK_TYPES_H
 
 #include <linux/atomic.h>
+#include <linux/backing-dev.h>
 #include <linux/types.h>
 #include <linux/bvec.h>
 #include <linux/kobject.h>

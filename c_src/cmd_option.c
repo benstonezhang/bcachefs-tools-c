@@ -31,7 +31,8 @@ static void set_option_usage(void)
 	     "\n"
 	     "Options:\n");
 	bch2_opts_usage(OPT_MOUNT);
-	puts("  -h, --help                  display this help and exit\n"
+	puts("  -d, --dev-idx               index for device specific options\n"
+	     "  -h, --help                  display this help and exit\n"
 	     "Report bugs to <linux-bcachefs@vger.kernel.org>");
 	exit(EXIT_SUCCESS);
 }
@@ -55,11 +56,24 @@ int cmd_set_option(int argc, char *argv[])
 {
 	struct bch_opt_strs new_opt_strs = bch2_cmdline_opts_get(&argc, argv, OPT_MOUNT|OPT_DEVICE);
 	struct bch_opts new_opts = bch2_parse_opts(new_opt_strs);
-	unsigned i;
+	DARRAY(unsigned) dev_idxs = {};
 	int opt, ret = 0;
 
-	while ((opt = getopt(argc, argv, "h")) != -1)
+	static const struct option longopts[] = {
+		{ "dev-idx",			required_argument,	NULL, 'd' },
+		{ "help",			no_argument,		NULL, 'h' },
+		{ NULL }
+	};
+
+	while ((opt = getopt_long(argc, argv, "d:h", longopts, NULL)) != -1)
 		switch (opt) {
+		case 'd': {
+			unsigned dev_idx;
+			if (kstrtoint(optarg, 10, &dev_idx))
+				die("error parsing %s", optarg);
+			darray_push(&dev_idxs, dev_idx);
+			break;
+		}
 		case 'h':
 			set_option_usage();
 			break;
@@ -72,6 +86,7 @@ int cmd_set_option(int argc, char *argv[])
 	}
 
 	bool online = false;
+	unsigned i;
 	for (i = 0; i < argc; i++)
 		if (dev_mounted(argv[i])) {
 			online = true;
@@ -110,14 +125,27 @@ int cmd_set_option(int argc, char *argv[])
 			}
 
 			if (opt->flags & OPT_DEVICE) {
-				for (unsigned dev = 0; dev < argc; dev++) {
-					int dev_idx = name_to_dev_idx(c, argv[dev]);
-					if (dev_idx < 0) {
-						fprintf(stderr, "Couldn't look up device %s\n", argv[i]);
-						continue;
-					}
+				if (dev_idxs.nr) {
+					darray_for_each(dev_idxs, dev) {
+						struct bch_dev *ca = bch2_dev_tryget_noerror(c, *dev);
+						if (!ca) {
+							fprintf(stderr, "Couldn't look up device %u\n", *dev);
+							continue;
+						}
 
-					bch2_opt_set_sb(c, c->devs[dev_idx], opt, v);
+						bch2_opt_set_sb(c, ca, opt, v);
+						bch2_dev_put(ca);
+					}
+				} else {
+					for (unsigned dev = 0; dev < argc; dev++) {
+						int dev_idx = name_to_dev_idx(c, argv[dev]);
+						if (dev_idx < 0) {
+							fprintf(stderr, "Couldn't look up device %s\n", argv[i]);
+							continue;
+						}
+
+						bch2_opt_set_sb(c, c->devs[dev_idx], opt, v);
+					}
 				}
 			}
 		}

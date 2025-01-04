@@ -3,6 +3,7 @@
 #define _BCACHEFS_IO_READ_H
 
 #include "bkey_buf.h"
+#include "reflink.h"
 
 struct bch_read_bio {
 	struct bch_fs		*c;
@@ -40,6 +41,7 @@ struct bch_read_bio {
 				have_ioref:1,
 				narrow_crcs:1,
 				hole:1,
+				saw_error:1,
 				retry:2,
 				context:2;
 	};
@@ -79,19 +81,32 @@ struct bch_devs_mask;
 struct cache_promote_op;
 struct extent_ptr_decoded;
 
-int __bch2_read_indirect_extent(struct btree_trans *, unsigned *,
-				struct bkey_buf *);
-
 static inline int bch2_read_indirect_extent(struct btree_trans *trans,
 					    enum btree_id *data_btree,
-					    unsigned *offset_into_extent,
-					    struct bkey_buf *k)
+					    s64 *offset_into_extent,
+					    struct bkey_buf *extent)
 {
-	if (k->k->k.type != KEY_TYPE_reflink_p)
+	if (extent->k->k.type != KEY_TYPE_reflink_p)
 		return 0;
 
 	*data_btree = BTREE_ID_reflink;
-	return __bch2_read_indirect_extent(trans, offset_into_extent, k);
+	struct btree_iter iter;
+	struct bkey_s_c k = bch2_lookup_indirect_extent(trans, &iter,
+						offset_into_extent,
+						bkey_i_to_s_c_reflink_p(extent->k),
+						true, 0);
+	int ret = bkey_err(k);
+	if (ret)
+		return ret;
+
+	if (bkey_deleted(k.k)) {
+		bch2_trans_iter_exit(trans, &iter);
+		return -BCH_ERR_missing_indirect_extent;
+	}
+
+	bch2_bkey_buf_reassemble(extent, trans->c, k);
+	bch2_trans_iter_exit(trans, &iter);
+	return 0;
 }
 
 enum bch_read_flags {
@@ -110,7 +125,7 @@ enum bch_read_flags {
 int __bch2_read_extent(struct btree_trans *, struct bch_read_bio *,
 		       struct bvec_iter, struct bpos, enum btree_id,
 		       struct bkey_s_c, unsigned,
-		       struct bch_io_failures *, unsigned);
+		       struct bch_io_failures *, unsigned, int);
 
 static inline void bch2_read_extent(struct btree_trans *trans,
 			struct bch_read_bio *rbio, struct bpos read_pos,
@@ -118,7 +133,7 @@ static inline void bch2_read_extent(struct btree_trans *trans,
 			unsigned offset_into_extent, unsigned flags)
 {
 	__bch2_read_extent(trans, rbio, rbio->bio.bi_iter, read_pos,
-			   data_btree, k, offset_into_extent, NULL, flags);
+			   data_btree, k, offset_into_extent, NULL, flags, -1);
 }
 
 void __bch2_read(struct bch_fs *, struct bch_read_bio *, struct bvec_iter,

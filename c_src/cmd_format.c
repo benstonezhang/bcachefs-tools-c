@@ -220,8 +220,7 @@ int cmd_format(int argc, char *argv[])
 			unconsumed_dev_option = true;
 			break;
 		case O_version:
-			if (kstrtouint(optarg, 10, &opts.version))
-				die("invalid version");
+			opts.version = version_parse(optarg);
 			break;
 		case O_no_initialize:
 			initialize = false;

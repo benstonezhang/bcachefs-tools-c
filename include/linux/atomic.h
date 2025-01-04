@@ -72,14 +72,14 @@ typedef struct {
 #define __ATOMIC_SUB_RETURN(v, p)	__atomic_sub_fetch(p, v, __ATOMIC_RELAXED)
 #define __ATOMIC_SUB_RETURN_RELEASE(v, p)				\
 					__atomic_sub_fetch(p, v, __ATOMIC_RELEASE)
-#define __ATOMIC_AND(p)			__atomic_and_fetch(p, v, __ATOMIC_RELAXED)
-#define __ATOMIC_OR(p)			__atomic_or_fetch(p, v, __ATOMIC_RELAXED)
+#define __ATOMIC_AND(v, p)		__atomic_and_fetch(&(p)->counter, v, __ATOMIC_RELAXED)
+#define __ATOMIC_OR(v, p)		__atomic_or_fetch(&(p)->counter, v, __ATOMIC_RELAXED)
 
 #define xchg(p, v)			__atomic_exchange_n(p, v, __ATOMIC_SEQ_CST)
 #define xchg_acquire(p, v)		__atomic_exchange_n(p, v, __ATOMIC_ACQUIRE)
 
 #define try_cmpxchg(p, old, new)				\
-	__atomic_compare_exchange_n((p), __old, new, false,	\
+	__atomic_compare_exchange_n((p), old, new, false,	\
 				    __ATOMIC_SEQ_CST,		\
 				    __ATOMIC_SEQ_CST)
 
@@ -188,12 +188,12 @@ static inline i_type a_type##_read_acquire(const a_type##_t *v)		\
 									\
 static inline void a_type##_set(a_type##_t *v, i_type i)		\
 {									\
-	return __ATOMIC_SET(&v->counter, i);				\
+	__ATOMIC_SET(&v->counter, i);					\
 }									\
 									\
 static inline void a_type##_set_release(a_type##_t *v, i_type i)	\
 {									\
-	return __ATOMIC_SET_RELEASE(&v->counter, i);			\
+	__ATOMIC_SET_RELEASE(&v->counter, i);				\
 }									\
 									\
 static inline i_type a_type##_add_return(i_type i, a_type##_t *v)	\

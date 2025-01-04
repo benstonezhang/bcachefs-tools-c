@@ -54,7 +54,8 @@
 	x(ENOMEM,			ENOMEM_compression_bounce_read_init)	\
 	x(ENOMEM,			ENOMEM_compression_bounce_write_init)	\
 	x(ENOMEM,			ENOMEM_compression_workspace_init)	\
-	x(ENOMEM,			ENOMEM_decompression_workspace_init)	\
+	x(ENOMEM,			ENOMEM_backpointer_mismatches_bitmap)	\
+	x(EIO,				compression_workspace_not_initialized)	\
 	x(ENOMEM,			ENOMEM_bucket_gens)			\
 	x(ENOMEM,			ENOMEM_buckets_nouse)			\
 	x(ENOMEM,			ENOMEM_usage_init)			\
@@ -83,6 +84,8 @@
 	x(ENOMEM,			ENOMEM_fs_other_alloc)			\
 	x(ENOMEM,			ENOMEM_dev_alloc)			\
 	x(ENOMEM,			ENOMEM_disk_accounting)			\
+	x(ENOMEM,			ENOMEM_stripe_head_alloc)		\
+	x(ENOMEM,                       ENOMEM_journal_read_bucket)             \
 	x(ENOSPC,			ENOSPC_disk_reservation)		\
 	x(ENOSPC,			ENOSPC_bucket_alloc)			\
 	x(ENOSPC,			ENOSPC_disk_label_add)			\
@@ -114,6 +117,8 @@
 	x(ENOENT,			ENOENT_dirent_doesnt_match_inode)	\
 	x(ENOENT,			ENOENT_dev_not_found)			\
 	x(ENOENT,			ENOENT_dev_idx_not_found)		\
+	x(ENOENT,			ENOENT_inode_no_backpointer)		\
+	x(ENOENT,			ENOENT_no_snapshot_tree_subvol)		\
 	x(ENOTEMPTY,			ENOTEMPTY_dir_not_empty)		\
 	x(ENOTEMPTY,			ENOTEMPTY_subvol_not_empty)		\
 	x(EEXIST,			EEXIST_str_hash_set)			\
@@ -146,6 +151,7 @@
 	x(BCH_ERR_transaction_restart,	transaction_restart_split_race)		\
 	x(BCH_ERR_transaction_restart,	transaction_restart_write_buffer_flush)	\
 	x(BCH_ERR_transaction_restart,	transaction_restart_nested)		\
+	x(BCH_ERR_transaction_restart,	transaction_restart_commit)		\
 	x(0,				no_btree_node)				\
 	x(BCH_ERR_no_btree_node,	no_btree_node_relock)			\
 	x(BCH_ERR_no_btree_node,	no_btree_node_upgrade)			\
@@ -191,7 +197,9 @@
 	x(EINVAL,			opt_parse_error)			\
 	x(EINVAL,			remove_with_metadata_missing_unimplemented)\
 	x(EINVAL,			remove_would_lose_data)			\
-	x(EINVAL,			btree_iter_with_journal_not_supported)	\
+	x(EINVAL,			no_resize_with_buckets_nouse)		\
+	x(EINVAL,			inode_unpack_error)			\
+	x(EINVAL,			varint_decode_error)			\
 	x(EROFS,			erofs_trans_commit)			\
 	x(EROFS,			erofs_no_writes)			\
 	x(EROFS,			erofs_journal_err)			\
@@ -223,6 +231,7 @@
 	x(BCH_ERR_invalid_sb_layout,	invalid_sb_layout_type)			\
 	x(BCH_ERR_invalid_sb_layout,	invalid_sb_layout_nr_superblocks)	\
 	x(BCH_ERR_invalid_sb_layout,	invalid_sb_layout_superblocks_overlap)	\
+	x(BCH_ERR_invalid_sb_layout,    invalid_sb_layout_sb_max_size_bits)     \
 	x(BCH_ERR_invalid_sb,		invalid_sb_members_missing)		\
 	x(BCH_ERR_invalid_sb,		invalid_sb_members)			\
 	x(BCH_ERR_invalid_sb,		invalid_sb_disk_groups)			\
@@ -239,7 +248,10 @@
 	x(BCH_ERR_invalid_sb,		invalid_sb_downgrade)			\
 	x(BCH_ERR_invalid,		invalid_bkey)				\
 	x(BCH_ERR_operation_blocked,    nocow_lock_blocked)			\
+	x(EIO,				journal_shutdown)			\
+	x(EIO,				journal_flush_err)			\
 	x(EIO,				btree_node_read_err)			\
+	x(BCH_ERR_btree_node_read_err,	btree_node_read_err_cached)		\
 	x(EIO,				sb_not_downgraded)			\
 	x(EIO,				btree_node_write_all_failed)		\
 	x(EIO,				btree_node_read_error)			\
@@ -255,6 +267,9 @@
 	x(EIO,				no_device_to_read_from)			\
 	x(EIO,				missing_indirect_extent)		\
 	x(EIO,				invalidate_stripe_to_dev)		\
+	x(EIO,				no_encryption_key)			\
+	x(EIO,				insufficient_journal_devices)		\
+	x(EIO,				device_offline)				\
 	x(BCH_ERR_btree_node_read_err,	btree_node_read_err_fixable)		\
 	x(BCH_ERR_btree_node_read_err,	btree_node_read_err_want_retry)		\
 	x(BCH_ERR_btree_node_read_err,	btree_node_read_err_must_retry)		\
@@ -303,6 +318,7 @@ static inline long bch2_err_class(long err)
 
 #define BLK_STS_REMOVED		((__force blk_status_t)128)
 
+#include <linux/blk_types.h>
 const char *bch2_blk_status_to_str(blk_status_t);
 
 #endif /* _BCACHFES_ERRCODE_H */

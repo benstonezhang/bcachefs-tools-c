@@ -726,6 +726,28 @@ struct bbpos_range bbpos_range_parse(char *buf)
 	return (struct bbpos_range) { .start = start, .end = end };
 }
 
+unsigned version_parse(char *buf)
+{
+	char *s = buf;
+	char *major_str = strsep(&s, ".");
+	char *minor_str	= strsep(&s, ".");
+
+	unsigned major, minor;
+
+	if (!minor_str) {
+		major = 0;
+		if (kstrtouint(major_str, 10, &minor))
+			die("invalid version %s", buf);
+	} else {
+
+		if (kstrtouint(major_str, 10, &major) ||
+		    kstrtouint(minor_str, 10, &minor))
+			die("invalid version %s", buf);
+	}
+
+	return BCH_VERSION(major, minor);
+}
+
 darray_str get_or_split_cmdline_devs(int argc, char *argv[])
 {
 	darray_str ret = {};
