@@ -222,8 +222,6 @@ static int accounting_p_cmp(const void *_l, const void *_r)
 
 	struct bpos lp = (*l)->k.p, rp = (*r)->k.p;
 
-	bch2_bpos_swab(&lp);
-	bch2_bpos_swab(&rp);
 	return bpos_cmp(lp, rp);
 }
 
