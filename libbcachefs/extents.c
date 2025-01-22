@@ -114,9 +114,8 @@ static inline bool ptr_better(struct bch_fs *c,
  * other devices, it will still pick a pointer from avoid.
  */
 int bch2_bkey_pick_read_device(struct bch_fs *c, struct bkey_s_c k,
-			      struct bch_io_failures *failed,
-			      struct extent_ptr_decoded *pick,
-			      int dev)
+			       struct bch_io_failures *failed,
+			       struct extent_ptr_decoded *pick)
 {
 	struct bkey_ptrs_c ptrs = bch2_bkey_ptrs_c(k);
 	const union bch_extent_entry *entry;
@@ -137,10 +136,6 @@ int bch2_bkey_pick_read_device(struct bch_fs *c, struct bkey_s_c k,
 			ret = 0;
 			break;
 		}
-
-		/* Are we being asked to read from a specific device? */
-		if (dev >= 0 && p.ptr.dev != dev)
-			continue;
 
 		/*
 		 * If there are any dirty pointers it's an error if we can't
