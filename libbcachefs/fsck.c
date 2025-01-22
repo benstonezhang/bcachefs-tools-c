@@ -832,11 +832,13 @@ struct inode_walker {
 	struct bpos			last_pos;
 
 	DARRAY(struct inode_walker_entry) inodes;
+	snapshot_id_list		deletes;
 };
 
 static void inode_walker_exit(struct inode_walker *w)
 {
 	darray_exit(&w->inodes);
+	darray_exit(&w->deletes);
 }
 
 static struct inode_walker inode_walker_init(void)
@@ -960,8 +962,9 @@ static int get_visible_inodes(struct btree_trans *trans,
 	int ret;
 
 	w->inodes.nr = 0;
+	w->deletes.nr = 0;
 
-	for_each_btree_key_norestart(trans, iter, BTREE_ID_inodes, POS(0, inum),
+	for_each_btree_key_reverse_norestart(trans, iter, BTREE_ID_inodes, SPOS(0, inum, s->pos.snapshot),
 			   BTREE_ITER_all_snapshots, k, ret) {
 		if (k.k->p.offset != inum)
 			break;
@@ -969,10 +972,13 @@ static int get_visible_inodes(struct btree_trans *trans,
 		if (!ref_visible(c, s, s->pos.snapshot, k.k->p.snapshot))
 			continue;
 
-		if (bkey_is_inode(k.k))
-			add_inode(c, w, k);
+		if (snapshot_list_has_ancestor(c, &w->deletes, k.k->p.snapshot))
+			continue;
 
-		if (k.k->p.snapshot >= s->pos.snapshot)
+		ret = bkey_is_inode(k.k)
+			? add_inode(c, w, k)
+			: snapshot_list_add(c, &w->deletes, k.k->p.snapshot);
+		if (ret)
 			break;
 	}
 	bch2_trans_iter_exit(trans, &iter);
@@ -1107,6 +1113,37 @@ found_root:
 	ret = bch2_inode_unpack(k, root);
 err:
 	bch2_trans_iter_exit(trans, &iter);
+	return ret;
+}
+
+static int check_directory_size(struct btree_trans *trans,
+				struct bch_inode_unpacked *inode_u,
+				struct bkey_s_c inode_k, bool *write_inode)
+{
+	struct btree_iter iter;
+	struct bkey_s_c k;
+	u64 new_size = 0;
+	int ret;
+
+	for_each_btree_key_max_norestart(trans, iter, BTREE_ID_dirents,
+			SPOS(inode_k.k->p.offset, 0, inode_k.k->p.snapshot),
+			POS(inode_k.k->p.offset, U64_MAX),
+			0, k, ret) {
+		if (k.k->type != KEY_TYPE_dirent)
+			continue;
+
+		struct bkey_s_c_dirent dirent = bkey_s_c_to_dirent(k);
+		struct qstr name = bch2_dirent_get_name(dirent);
+
+		new_size += dirent_occupied_size(&name);
+	}
+	bch2_trans_iter_exit(trans, &iter);
+
+	if (!ret && inode_u->bi_size != new_size) {
+		inode_u->bi_size = new_size;
+		*write_inode = true;
+	}
+
 	return ret;
 }
 
@@ -1297,6 +1334,16 @@ static int check_inode(struct btree_trans *trans,
 			buf.buf))) {
 		u.bi_journal_seq = journal_cur_seq(&c->journal);
 		do_update = true;
+	}
+
+	if (S_ISDIR(u.bi_mode)) {
+		ret = check_directory_size(trans, &u, k, &do_update);
+
+		fsck_err_on(ret,
+			    trans, directory_size_mismatch,
+			    "directory inode %llu:%u with the mismatch directory size",
+			    u.bi_inum, k.k->p.snapshot);
+		ret = 0;
 	}
 do_update:
 	if (do_update) {
@@ -2380,6 +2427,30 @@ static int check_dirent(struct btree_trans *trans, struct btree_iter *iter,
 			if (ret)
 				goto err;
 		}
+
+		darray_for_each(target->deletes, i)
+			if (fsck_err_on(!snapshot_list_has_id(&s->ids, *i),
+					trans, dirent_to_overwritten_inode,
+					"dirent points to inode overwritten in snapshot %u:\n%s",
+					*i,
+					(printbuf_reset(&buf),
+					 bch2_bkey_val_to_text(&buf, c, k),
+					 buf.buf))) {
+				struct btree_iter delete_iter;
+				bch2_trans_iter_init(trans, &delete_iter,
+						     BTREE_ID_dirents,
+						     SPOS(k.k->p.inode, k.k->p.offset, *i),
+						     BTREE_ITER_intent);
+				ret =   bch2_btree_iter_traverse(&delete_iter) ?:
+					bch2_hash_delete_at(trans, bch2_dirent_hash_desc,
+							  hash_info,
+							  &delete_iter,
+							  BTREE_UPDATE_internal_snapshot_node);
+				bch2_trans_iter_exit(trans, &delete_iter);
+				if (ret)
+					goto err;
+
+			}
 	}
 
 	ret = bch2_trans_commit(trans, NULL, NULL, BCH_TRANS_COMMIT_no_enospc);

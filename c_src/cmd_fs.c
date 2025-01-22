@@ -122,6 +122,14 @@ static int dev_by_label_cmp(const void *_l, const void *_r)
 		cmp_int(l->idx, r->idx);
 }
 
+static struct dev_name *dev_idx_to_name(dev_names *dev_names, unsigned idx)
+{
+	darray_for_each(*dev_names, dev)
+		if (dev->idx == idx)
+			return dev;
+	return NULL;
+}
+
 static void devs_usage_to_text(struct printbuf *out,
 			       struct bchfs_handle fs,
 			       dev_names dev_names)
@@ -222,8 +230,6 @@ static int accounting_p_cmp(const void *_l, const void *_r)
 
 	struct bpos lp = (*l)->k.p, rp = (*r)->k.p;
 
-	bch2_bpos_swab(&lp);
-	bch2_bpos_swab(&rp);
 	return bpos_cmp(lp, rp);
 }
 
