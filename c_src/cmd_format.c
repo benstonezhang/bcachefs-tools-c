@@ -147,7 +147,7 @@ int cmd_format(int argc, char *argv[])
 		initialize = false;
 
 	while ((opt = getopt_long(argc, argv,
-				  "-L:U:g:fqhv",
+				  "-L:l:U:g:fqhv",
 				  format_opts,
 				  NULL)) != -1)
 		switch (opt) {
@@ -238,6 +238,7 @@ int cmd_format(int argc, char *argv[])
 			break;
 		case 'v':
 			verbose = true;
+			break;
 		case O_help:
 		case 'h':
 			usage();
