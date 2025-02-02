@@ -47,6 +47,14 @@ dnf install -y libaio-devel libsodium-devel \
     findutils udev systemd-devel llvm-devel
 ```
 
+openSUSE: install build dependencies with:
+```shell
+zypper install -y libaio-devel libsodium-devel \
+    libblkid-devel liburcu-devel libzstd-devel zlib-devel \
+    liblz4-devel libuuid-devel valgrind-devel keyutils-devel \
+    findutils udev systemd-devel llvm-devel
+```
+
 Arch: install bcachefs-tools-git from the AUR.
 Or to build from source, install build dependencies with
 ```shell
