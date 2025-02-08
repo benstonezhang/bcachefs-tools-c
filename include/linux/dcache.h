@@ -9,4 +9,7 @@ struct dentry {
 	struct inode *d_inode;
 };
 
+#define QSTR_INIT(n,l) { { { .len = l } }, .name = n }
+#define QSTR(n) (struct qstr)QSTR_INIT(n, strlen(n))
+
 #endif	/* __LINUX_DCACHE_H */

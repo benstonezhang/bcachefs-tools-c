@@ -193,7 +193,7 @@ bch2_journal_add_entry_noreservation(struct journal_buf *buf, size_t u64s)
 static inline struct jset_entry *
 journal_res_entry(struct journal *j, struct journal_res *res)
 {
-	return vstruct_idx(j->buf[res->idx].data, res->offset);
+	return vstruct_idx(j->buf[res->seq & JOURNAL_BUF_MASK].data, res->offset);
 }
 
 static inline unsigned journal_entry_init(struct jset_entry *entry, unsigned type,
@@ -267,8 +267,9 @@ bool bch2_journal_entry_close(struct journal *);
 void bch2_journal_do_writes(struct journal *);
 void bch2_journal_buf_put_final(struct journal *, u64);
 
-static inline void __bch2_journal_buf_put(struct journal *j, unsigned idx, u64 seq)
+static inline void __bch2_journal_buf_put(struct journal *j, u64 seq)
 {
+	unsigned idx = seq & JOURNAL_BUF_MASK;
 	union journal_res_state s;
 
 	s = journal_state_buf_put(j, idx);
@@ -276,8 +277,9 @@ static inline void __bch2_journal_buf_put(struct journal *j, unsigned idx, u64 s
 		bch2_journal_buf_put_final(j, seq);
 }
 
-static inline void bch2_journal_buf_put(struct journal *j, unsigned idx, u64 seq)
+static inline void bch2_journal_buf_put(struct journal *j, u64 seq)
 {
+	unsigned idx = seq & JOURNAL_BUF_MASK;
 	union journal_res_state s;
 
 	s = journal_state_buf_put(j, idx);
@@ -306,13 +308,13 @@ static inline void bch2_journal_res_put(struct journal *j,
 				       BCH_JSET_ENTRY_btree_keys,
 				       0, 0, 0);
 
-	bch2_journal_buf_put(j, res->idx, res->seq);
+	bch2_journal_buf_put(j, res->seq);
 
 	res->ref = 0;
 }
 
 int bch2_journal_res_get_slowpath(struct journal *, struct journal_res *,
-				  unsigned);
+				  unsigned, struct btree_trans *);
 
 /* First bits for BCH_WATERMARK: */
 enum journal_res_flags {
@@ -361,14 +363,17 @@ static inline int journal_res_get_fast(struct journal *j,
 				       &old.v, new.v));
 
 	res->ref	= true;
-	res->idx	= old.idx;
 	res->offset	= old.cur_entry_offset;
-	res->seq	= le64_to_cpu(j->buf[old.idx].data->seq);
+	res->seq	= journal_cur_seq(j);
+	res->seq -= (res->seq - old.idx) & JOURNAL_BUF_MASK;
+
+	EBUG_ON(res->seq != le64_to_cpu(j->buf[old.idx].data->seq));
 	return 1;
 }
 
 static inline int bch2_journal_res_get(struct journal *j, struct journal_res *res,
-				       unsigned u64s, unsigned flags)
+				       unsigned u64s, unsigned flags,
+				       struct btree_trans *trans)
 {
 	int ret;
 
@@ -380,7 +385,7 @@ static inline int bch2_journal_res_get(struct journal *j, struct journal_res *re
 	if (journal_res_get_fast(j, res, flags))
 		goto out;
 
-	ret = bch2_journal_res_get_slowpath(j, res, flags);
+	ret = bch2_journal_res_get_slowpath(j, res, flags, trans);
 	if (ret)
 		return ret;
 out:
@@ -408,6 +413,7 @@ bool bch2_journal_noflush_seq(struct journal *, u64, u64);
 int bch2_journal_meta(struct journal *);
 
 void bch2_journal_halt(struct journal *);
+void bch2_journal_halt_locked(struct journal *);
 
 static inline int bch2_journal_error(struct journal *j)
 {
@@ -429,8 +435,6 @@ struct journal_buf *bch2_next_write_buffer_flush_journal_buf(struct journal *, u
 
 void __bch2_journal_debug_to_text(struct printbuf *, struct journal *);
 void bch2_journal_debug_to_text(struct printbuf *, struct journal *);
-void bch2_journal_pins_to_text(struct printbuf *, struct journal *);
-bool bch2_journal_seq_pins_to_text(struct printbuf *, struct journal *, u64 *);
 
 int bch2_set_nr_journal_buckets(struct bch_fs *, struct bch_dev *,
 				unsigned nr);

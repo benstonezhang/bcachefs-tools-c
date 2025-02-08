@@ -727,7 +727,7 @@ DEFINE_EVENT(fs_str, bucket_alloc_fail,
 	TP_ARGS(c, str)
 );
 
-TRACE_EVENT(discard_buckets,
+DECLARE_EVENT_CLASS(discard_buckets_class,
 	TP_PROTO(struct bch_fs *c, u64 seen, u64 open,
 		 u64 need_journal_commit, u64 discarded, const char *err),
 	TP_ARGS(c, seen, open, need_journal_commit, discarded, err),
@@ -759,6 +759,18 @@ TRACE_EVENT(discard_buckets,
 		  __entry->err)
 );
 
+DEFINE_EVENT(discard_buckets_class, discard_buckets,
+	TP_PROTO(struct bch_fs *c, u64 seen, u64 open,
+		 u64 need_journal_commit, u64 discarded, const char *err),
+	TP_ARGS(c, seen, open, need_journal_commit, discarded, err)
+);
+
+DEFINE_EVENT(discard_buckets_class, discard_buckets_fast,
+	TP_PROTO(struct bch_fs *c, u64 seen, u64 open,
+		 u64 need_journal_commit, u64 discarded, const char *err),
+	TP_ARGS(c, seen, open, need_journal_commit, discarded, err)
+);
+
 TRACE_EVENT(bucket_invalidate,
 	TP_PROTO(struct bch_fs *c, unsigned dev, u64 bucket, u32 sectors),
 	TP_ARGS(c, dev, bucket, sectors),
@@ -784,27 +796,6 @@ TRACE_EVENT(bucket_invalidate,
 );
 
 /* Moving IO */
-
-TRACE_EVENT(bucket_evacuate,
-	TP_PROTO(struct bch_fs *c, struct bpos *bucket),
-	TP_ARGS(c, bucket),
-
-	TP_STRUCT__entry(
-		__field(dev_t,		dev			)
-		__field(u32,		dev_idx			)
-		__field(u64,		bucket			)
-	),
-
-	TP_fast_assign(
-		__entry->dev		= c->dev;
-		__entry->dev_idx	= bucket->inode;
-		__entry->bucket		= bucket->offset;
-	),
-
-	TP_printk("%d:%d %u:%llu",
-		  MAJOR(__entry->dev), MINOR(__entry->dev),
-		  __entry->dev_idx, __entry->bucket)
-);
 
 DEFINE_EVENT(fs_str, move_extent,
 	TP_PROTO(struct bch_fs *c, const char *str),
@@ -869,65 +860,32 @@ TRACE_EVENT(move_data,
 		  __entry->sectors_raced)
 );
 
-TRACE_EVENT(evacuate_bucket,
-	TP_PROTO(struct bch_fs *c, struct bpos *bucket,
-		 unsigned sectors, unsigned bucket_size,
-		 int ret),
-	TP_ARGS(c, bucket, sectors, bucket_size, ret),
-
-	TP_STRUCT__entry(
-		__field(dev_t,		dev		)
-		__field(u64,		member		)
-		__field(u64,		bucket		)
-		__field(u32,		sectors		)
-		__field(u32,		bucket_size	)
-		__field(int,		ret		)
-	),
-
-	TP_fast_assign(
-		__entry->dev			= c->dev;
-		__entry->member			= bucket->inode;
-		__entry->bucket			= bucket->offset;
-		__entry->sectors		= sectors;
-		__entry->bucket_size		= bucket_size;
-		__entry->ret			= ret;
-	),
-
-	TP_printk("%d,%d %llu:%llu sectors %u/%u ret %i",
-		  MAJOR(__entry->dev), MINOR(__entry->dev),
-		  __entry->member, __entry->bucket,
-		  __entry->sectors, __entry->bucket_size,
-		  __entry->ret)
-);
-
 TRACE_EVENT(copygc,
 	TP_PROTO(struct bch_fs *c,
-		 u64 sectors_moved, u64 sectors_not_moved,
-		 u64 buckets_moved, u64 buckets_not_moved),
-	TP_ARGS(c,
-		sectors_moved, sectors_not_moved,
-		buckets_moved, buckets_not_moved),
+		 u64 buckets,
+		 u64 sectors_seen,
+		 u64 sectors_moved),
+	TP_ARGS(c, buckets, sectors_seen, sectors_moved),
 
 	TP_STRUCT__entry(
 		__field(dev_t,		dev			)
+		__field(u64,		buckets			)
+		__field(u64,		sectors_seen		)
 		__field(u64,		sectors_moved		)
-		__field(u64,		sectors_not_moved	)
-		__field(u64,		buckets_moved		)
-		__field(u64,		buckets_not_moved	)
 	),
 
 	TP_fast_assign(
 		__entry->dev			= c->dev;
+		__entry->buckets		= buckets;
+		__entry->sectors_seen		= sectors_seen;
 		__entry->sectors_moved		= sectors_moved;
-		__entry->sectors_not_moved	= sectors_not_moved;
-		__entry->buckets_moved		= buckets_moved;
-		__entry->buckets_not_moved = buckets_moved;
 	),
 
-	TP_printk("%d,%d sectors moved %llu remain %llu buckets moved %llu remain %llu",
+	TP_printk("%d,%d buckets %llu sectors seen %llu moved %llu",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
-		  __entry->sectors_moved, __entry->sectors_not_moved,
-		  __entry->buckets_moved, __entry->buckets_not_moved)
+		  __entry->buckets,
+		  __entry->sectors_seen,
+		  __entry->sectors_moved)
 );
 
 TRACE_EVENT(copygc_wait,

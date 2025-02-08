@@ -31,9 +31,6 @@
 #include "libbcachefs/replicas.h"
 #include "libbcachefs/super.h"
 
-/* XXX cut and pasted from fsck.c */
-#define QSTR(n) { { { .len = strlen(n) } }, .name = n }
-
 static char *dev_t_to_path(dev_t dev)
 {
 	char link[PATH_MAX], *p;

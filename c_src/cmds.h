@@ -15,6 +15,7 @@ int cmd_reset_counters(int argc, char *argv[]);
 int cmd_set_option(int argc, char *argv[]);
 
 int cmd_fs_usage(int argc, char *argv[]);
+int cmd_fs_top(int argc, char *argv[]);
 
 int device_usage(void);
 int cmd_device_add(int argc, char *argv[]);
@@ -28,6 +29,7 @@ int cmd_device_resize_journal(int argc, char *argv[]);
 
 int data_usage(void);
 int cmd_data_rereplicate(int argc, char *argv[]);
+int cmd_data_scrub(int argc, char *argv[]);
 int cmd_data_job(int argc, char *argv[]);
 
 int cmd_unlock(int argc, char *argv[]);

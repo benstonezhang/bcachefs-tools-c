@@ -53,15 +53,15 @@ struct journal_buf {
  */
 
 enum journal_pin_type {
-	JOURNAL_PIN_btree,
-	JOURNAL_PIN_key_cache,
-	JOURNAL_PIN_other,
-	JOURNAL_PIN_NR,
+	JOURNAL_PIN_TYPE_btree,
+	JOURNAL_PIN_TYPE_key_cache,
+	JOURNAL_PIN_TYPE_other,
+	JOURNAL_PIN_TYPE_NR,
 };
 
 struct journal_entry_pin_list {
-	struct list_head		list[JOURNAL_PIN_NR];
-	struct list_head		flushed;
+	struct list_head		unflushed[JOURNAL_PIN_TYPE_NR];
+	struct list_head		flushed[JOURNAL_PIN_TYPE_NR];
 	atomic_t			count;
 	struct bch_devs_list		devs;
 };
@@ -79,7 +79,6 @@ struct journal_entry_pin {
 
 struct journal_res {
 	bool			ref;
-	u8			idx;
 	u16			u64s;
 	u32			offset;
 	u64			seq;
@@ -95,9 +94,8 @@ union journal_res_state {
 	};
 
 	struct {
-		u64		cur_entry_offset:20,
+		u64		cur_entry_offset:22,
 				idx:2,
-				unwritten_idx:2,
 				buf0_count:10,
 				buf1_count:10,
 				buf2_count:10,
@@ -107,13 +105,13 @@ union journal_res_state {
 
 /* bytes: */
 #define JOURNAL_ENTRY_SIZE_MIN		(64U << 10) /* 64k */
-#define JOURNAL_ENTRY_SIZE_MAX		(4U  << 20) /* 4M */
+#define JOURNAL_ENTRY_SIZE_MAX		(4U  << 22) /* 16M */
 
 /*
  * We stash some journal state as sentinal values in cur_entry_offset:
  * note - cur_entry_offset is in units of u64s
  */
-#define JOURNAL_ENTRY_OFFSET_MAX	((1U << 20) - 1)
+#define JOURNAL_ENTRY_OFFSET_MAX	((1U << 22) - 1)
 
 #define JOURNAL_ENTRY_BLOCKED_VAL	(JOURNAL_ENTRY_OFFSET_MAX - 2)
 #define JOURNAL_ENTRY_CLOSED_VAL	(JOURNAL_ENTRY_OFFSET_MAX - 1)
@@ -226,6 +224,7 @@ struct journal {
 	/* Used when waiting because the journal was full */
 	wait_queue_head_t	wait;
 	struct closure_waitlist	async_wait;
+	struct closure_waitlist	reclaim_flush_wait;
 
 	struct delayed_work	write_work;
 	struct workqueue_struct *wq;
@@ -236,6 +235,7 @@ struct journal {
 	/* seq, last_seq from the most recent journal entry successfully written */
 	u64			seq_ondisk;
 	u64			flushed_seq_ondisk;
+	u64			flushing_seq;
 	u64			last_seq_ondisk;
 	u64			err_seq;
 	u64			last_empty_seq;
