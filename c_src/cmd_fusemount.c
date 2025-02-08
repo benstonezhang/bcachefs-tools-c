@@ -31,9 +31,6 @@
 
 #include <linux/dcache.h>
 
-/* XXX cut and pasted from fsck.c */
-#define QSTR(n) { { { .len = strlen(n) } }, .name = n }
-
 /* used by write_aligned function for waiting on bch2_write closure */
 struct write_aligned_op_t {
         struct closure cl;
@@ -478,10 +475,9 @@ static int read_aligned(struct bch_fs *c, subvol_inum inum, size_t aligned_size,
 	closure_init_stack(&cl);
 
 	closure_get(&cl);
-	rbio.bio.bi_end_io		= bcachefs_fuse_read_endio;
-	rbio.bio.bi_private		= &cl;
+	rbio.bio.bi_private = &cl;
 
-	bch2_read(c, rbio_init(&rbio.bio, io_opts), inum);
+	bch2_read(c, rbio_init(&rbio.bio, c, io_opts, bcachefs_fuse_read_endio), inum);
 
 	closure_sync(&cl);
 

@@ -49,10 +49,9 @@ dnf install -y libaio-devel libsodium-devel \
 
 openSUSE: install build dependencies with:
 ```shell
-zypper install -y libaio-devel libsodium-devel \
-    libblkid-devel liburcu-devel libzstd-devel zlib-devel \
-    liblz4-devel libuuid-devel valgrind-devel keyutils-devel \
-    findutils udev systemd-devel llvm-devel
+zypper in -y libaio-devel libsodium-devel libblkid-devel liburcu-devel \
+    libzstd-devel zlib-devel liblz4-devel libuuid-devel valgrind-devel \
+    keyutils-devel findutils udev systemd-devel llvm-devel
 ```
 
 Arch: install bcachefs-tools-git from the AUR.
@@ -86,6 +85,11 @@ dnf install -y fuse3-devel
 Arch:
 ```shell
 pacman -S fuse3
+```
+
+openSUSE:
+```shell
+zypper in -y fuse3-devel
 ```
 
 Then, make using the `BCACHEFS_FUSE` environment variable (make clean first if

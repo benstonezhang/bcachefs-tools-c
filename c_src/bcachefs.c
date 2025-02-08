@@ -52,6 +52,7 @@ void bcachefs_usage(void)
 #endif
 	     "Commands for managing a running filesystem:\n"
 	     "  fs usage                 Show disk usage\n"
+	     "  fs top                   Show runtime performance information\n"
 	     "\n"
 	     "Commands for managing devices within a running filesystem:\n"
 	     "  device add               Add a new device to an existing filesystem\n"
@@ -70,6 +71,7 @@ void bcachefs_usage(void)
 	     "\n"
 	     "Commands for managing filesystem data:\n"
 	     "  data rereplicate         Rereplicate degraded data\n"
+	     "  data scrub               Verify checksums and correct errors, if possible\n"
 	     "  data job                 Kick off low level data jobs\n"
 	     "\n"
 	     "Encryption:\n"
@@ -119,6 +121,8 @@ int fs_cmds(int argc, char *argv[])
 	}
 	if (!strcmp(cmd, "usage"))
 		return cmd_fs_usage(argc, argv);
+	if (!strcmp(cmd, "top"))
+		return cmd_fs_top(argc, argv);
 
 	return 0;
 }
@@ -157,6 +161,8 @@ int data_cmds(int argc, char *argv[])
 		return data_usage();
 	if (!strcmp(cmd, "rereplicate"))
 		return cmd_data_rereplicate(argc, argv);
+	if (!strcmp(cmd, "scrub"))
+		return cmd_data_scrub(argc, argv);
 	if (!strcmp(cmd, "job"))
 		return cmd_data_job(argc, argv);
 

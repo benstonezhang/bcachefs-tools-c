@@ -97,6 +97,11 @@ struct task_struct {
 	struct signal_struct	{
 		struct rw_semaphore exec_update_lock;
 	}			*signal, _signal;
+
+	struct {
+		u64		sum_exec_runtime;
+		u64		exec_start;
+	}			se;
 };
 
 extern __thread struct task_struct *current;
