@@ -35,7 +35,7 @@ Fedora: install build dependencies either with `dnf builddep bcachefs-tools` or 
 dnf install -y @c-development libaio-devel libsodium-devel \
     libblkid-devel libzstd-devel zlib-devel userspace-rcu-devel \
     lz4-devel libuuid-devel valgrind-devel keyutils-libs-devel \
-    findutils systemd-devel clang-devel llvm-devel rust cargo
+    findutils udev systemd-devel llvm-devel
 ```
 
 openSUSE: install build dependencies with:
