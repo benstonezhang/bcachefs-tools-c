@@ -39,12 +39,12 @@ Starting from Debian Trixie and Ubuntu 23.10, you will additionally need:
 apt install -y systemd-dev
 ```
 
-Fedora: install the "Development tools" group along with:
+Fedora: install build dependencies either with `dnf builddep bcachefs-tools` or with:
 ```shell
-dnf install -y libaio-devel libsodium-devel \
+dnf install -y @c-development libaio-devel libsodium-devel \
     libblkid-devel libzstd-devel zlib-devel userspace-rcu-devel \
     lz4-devel libuuid-devel valgrind-devel keyutils-libs-devel \
-    findutils udev systemd-devel llvm-devel
+    findutils systemd-devel clang-devel llvm-devel rust cargo
 ```
 
 openSUSE: install build dependencies with:

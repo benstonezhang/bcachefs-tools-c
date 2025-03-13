@@ -38,28 +38,28 @@ const char * const bch2_data_ops_strs[] = {
 	NULL
 };
 
-static void trace_move_extent2(struct bch_fs *c, struct bkey_s_c k,
+static void trace_io_move2(struct bch_fs *c, struct bkey_s_c k,
 			       struct bch_io_opts *io_opts,
 			       struct data_update_opts *data_opts)
 {
-	if (trace_move_extent_enabled()) {
+	if (trace_io_move_enabled()) {
 		struct printbuf buf = PRINTBUF;
 
 		bch2_bkey_val_to_text(&buf, c, k);
 		prt_newline(&buf);
 		bch2_data_update_opts_to_text(&buf, c, io_opts, data_opts);
-		trace_move_extent(c, buf.buf);
+		trace_io_move(c, buf.buf);
 		printbuf_exit(&buf);
 	}
 }
 
-static void trace_move_extent_read2(struct bch_fs *c, struct bkey_s_c k)
+static void trace_io_move_read2(struct bch_fs *c, struct bkey_s_c k)
 {
-	if (trace_move_extent_read_enabled()) {
+	if (trace_io_move_read_enabled()) {
 		struct printbuf buf = PRINTBUF;
 
 		bch2_bkey_val_to_text(&buf, c, k);
-		trace_move_extent_read(c, buf.buf);
+		trace_io_move_read(c, buf.buf);
 		printbuf_exit(&buf);
 	}
 }
@@ -89,7 +89,12 @@ static void move_free(struct moving_io *io)
 	wake_up(&ctxt->wait);
 	mutex_unlock(&ctxt->lock);
 
-	bch2_data_update_exit(&io->write);
+	if (!io->write.data_opts.scrub) {
+		bch2_data_update_exit(&io->write);
+	} else {
+		bch2_bio_free_pages_pool(io->write.op.c, &io->write.op.wbio.bio);
+		kfree(io->write.bvecs);
+	}
 	kfree(io);
 }
 
@@ -127,12 +132,12 @@ static void move_write(struct moving_io *io)
 		return;
 	}
 
-	if (trace_move_extent_write_enabled()) {
+	if (trace_io_move_write_enabled()) {
 		struct bch_fs *c = io->write.op.c;
 		struct printbuf buf = PRINTBUF;
 
 		bch2_bkey_val_to_text(&buf, c, bkey_i_to_s_c(io->write.k.k));
-		trace_move_extent_write(c, buf.buf);
+		trace_io_move_write(c, buf.buf);
 		printbuf_exit(&buf);
 	}
 
@@ -268,7 +273,8 @@ int bch2_move_extent(struct moving_context *ctxt,
 	struct bch_fs *c = trans->c;
 	int ret = -ENOMEM;
 
-	trace_move_extent2(c, k, &io_opts, &data_opts);
+	trace_io_move2(c, k, &io_opts, &data_opts);
+	this_cpu_add(c->counters[BCH_COUNTER_io_move], k.k->size);
 
 	if (ctxt->stats)
 		ctxt->stats->pos = BBPOS(iter->btree_id, iter->pos);
@@ -300,15 +306,21 @@ int bch2_move_extent(struct moving_context *ctxt,
 
 	if (!data_opts.scrub) {
 		ret = bch2_data_update_init(trans, iter, ctxt, &io->write, ctxt->wp,
-					    io_opts, data_opts, iter->btree_id, k);
+					    &io_opts, data_opts, iter->btree_id, k);
 		if (ret)
 			goto err_free;
 
 		io->write.op.end_io	= move_write_done;
 	} else {
 		bch2_bkey_buf_init(&io->write.k);
+		bch2_bkey_buf_reassemble(&io->write.k, c, k);
+
 		io->write.op.c		= c;
 		io->write.data_opts	= data_opts;
+
+		ret = bch2_data_update_bios_init(&io->write, c, &io_opts);
+		if (ret)
+			goto err_free;
 	}
 
 	io->write.rbio.bio.bi_end_io = move_read_endio;
@@ -327,9 +339,7 @@ int bch2_move_extent(struct moving_context *ctxt,
 		atomic_inc(&io->b->count);
 	}
 
-	this_cpu_add(c->counters[BCH_COUNTER_io_move], k.k->size);
-	this_cpu_add(c->counters[BCH_COUNTER_move_extent_read], k.k->size);
-	trace_move_extent_read2(c, k);
+	trace_io_move_read2(c, k);
 
 	mutex_lock(&ctxt->lock);
 	atomic_add(io->read_sectors, &ctxt->read_sectors);
@@ -363,15 +373,15 @@ err:
 	    bch2_err_matches(ret, BCH_ERR_transaction_restart))
 		return ret;
 
-	count_event(c, move_extent_start_fail);
+	count_event(c, io_move_start_fail);
 
-	if (trace_move_extent_start_fail_enabled()) {
+	if (trace_io_move_start_fail_enabled()) {
 		struct printbuf buf = PRINTBUF;
 
 		bch2_bkey_val_to_text(&buf, c, k);
 		prt_str(&buf, ": ");
 		prt_str(&buf, bch2_err_str(ret));
-		trace_move_extent_start_fail(c, buf.buf);
+		trace_io_move_start_fail(c, buf.buf);
 		printbuf_exit(&buf);
 	}
 	return ret;
@@ -764,6 +774,9 @@ static int __bch2_move_data_phys(struct moving_context *ctxt,
 		if (!(data_types & BIT(bp.v->data_type)))
 			goto next;
 
+		if (!bp.v->level && bp.v->btree_id == BTREE_ID_stripes)
+			goto next;
+
 		k = bch2_backpointer_get_key(trans, bp, &iter, 0, &last_flushed);
 		ret = bkey_err(k);
 		if (bch2_err_matches(ret, BCH_ERR_transaction_restart))
@@ -849,6 +862,7 @@ static int bch2_move_data_phys(struct bch_fs *c,
 
 	bch2_moving_ctxt_init(&ctxt, c, rate, stats, wp, wait_on_copygc);
 	ctxt.stats->phys = true;
+	ctxt.stats->data_type = (int) DATA_PROGRESS_DATA_TYPE_phys;
 
 	int ret = __bch2_move_data_phys(&ctxt, NULL, dev, start, end, data_types, pred, arg);
 	bch2_moving_ctxt_exit(&ctxt);
@@ -1038,14 +1052,6 @@ static bool rereplicate_btree_pred(struct bch_fs *c, void *arg,
 	return rereplicate_pred(c, arg, bkey_i_to_s_c(&b->key), io_opts, data_opts);
 }
 
-static bool migrate_btree_pred(struct bch_fs *c, void *arg,
-			       struct btree *b,
-			       struct bch_io_opts *io_opts,
-			       struct data_update_opts *data_opts)
-{
-	return migrate_pred(c, arg, bkey_i_to_s_c(&b->key), io_opts, data_opts);
-}
-
 /*
  * Ancient versions of bcachefs produced packed formats which could represent
  * keys that the in memory format cannot represent; this checks for those
@@ -1174,6 +1180,12 @@ int bch2_data_job(struct bch_fs *c,
 
 	switch (op.op) {
 	case BCH_DATA_OP_scrub:
+		/*
+		 * prevent tests from spuriously failing, make sure we see all
+		 * btree nodes that need to be repaired
+		 */
+		bch2_btree_interior_updates_flush(c);
+
 		ret = bch2_move_data_phys(c, op.scrub.dev, 0, U64_MAX,
 					  op.scrub.data_types,
 					  NULL,
@@ -1202,14 +1214,14 @@ int bch2_data_job(struct bch_fs *c,
 
 		stats->data_type = BCH_DATA_journal;
 		ret = bch2_journal_flush_device_pins(&c->journal, op.migrate.dev);
-		ret = bch2_move_btree(c, start, end,
-				      migrate_btree_pred, &op, stats) ?: ret;
-		ret = bch2_move_data(c, start, end,
-				     NULL,
-				     stats,
-				     writepoint_hashed((unsigned long) current),
-				     true,
-				     migrate_pred, &op) ?: ret;
+		ret = bch2_move_data_phys(c, op.migrate.dev, 0, U64_MAX,
+					  ~0,
+					  NULL,
+					  stats,
+					  writepoint_hashed((unsigned long) current),
+					  true,
+					  migrate_pred, &op) ?: ret;
+		bch2_btree_interior_updates_flush(c);
 		ret = bch2_replicas_gc2(c) ?: ret;
 		break;
 	case BCH_DATA_OP_rewrite_old_nodes:

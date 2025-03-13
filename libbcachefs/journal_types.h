@@ -12,7 +12,11 @@
 /* btree write buffer steals 8 bits for its own purposes: */
 #define JOURNAL_SEQ_MAX		((1ULL << 56) - 1)
 
-#define JOURNAL_BUF_BITS	2
+#define JOURNAL_STATE_BUF_BITS	2
+#define JOURNAL_STATE_BUF_NR	(1U << JOURNAL_STATE_BUF_BITS)
+#define JOURNAL_STATE_BUF_MASK	(JOURNAL_STATE_BUF_NR - 1)
+
+#define JOURNAL_BUF_BITS	4
 #define JOURNAL_BUF_NR		(1U << JOURNAL_BUF_BITS)
 #define JOURNAL_BUF_MASK	(JOURNAL_BUF_NR - 1)
 
@@ -53,7 +57,10 @@ struct journal_buf {
  */
 
 enum journal_pin_type {
-	JOURNAL_PIN_TYPE_btree,
+	JOURNAL_PIN_TYPE_btree3,
+	JOURNAL_PIN_TYPE_btree2,
+	JOURNAL_PIN_TYPE_btree1,
+	JOURNAL_PIN_TYPE_btree0,
 	JOURNAL_PIN_TYPE_key_cache,
 	JOURNAL_PIN_TYPE_other,
 	JOURNAL_PIN_TYPE_NR,
@@ -150,9 +157,11 @@ enum journal_flags {
 	x(retry)			\
 	x(blocked)			\
 	x(max_in_flight)		\
+	x(max_open)			\
 	x(journal_full)			\
 	x(journal_pin_full)		\
 	x(journal_stuck)		\
+	x(enomem)			\
 	x(insufficient_devices)
 
 enum journal_errors {
@@ -215,6 +224,8 @@ struct journal {
 	 * other is possibly being written out.
 	 */
 	struct journal_buf	buf[JOURNAL_BUF_NR];
+	void			*free_buf;
+	unsigned		free_buf_size;
 
 	spinlock_t		lock;
 
@@ -232,6 +243,7 @@ struct journal {
 	/* Sequence number of most recent journal entry (last entry in @pin) */
 	atomic64_t		seq;
 
+	u64			seq_write_started;
 	/* seq, last_seq from the most recent journal entry successfully written */
 	u64			seq_ondisk;
 	u64			flushed_seq_ondisk;

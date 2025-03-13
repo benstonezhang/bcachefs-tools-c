@@ -16,53 +16,6 @@ typedef struct {
 	u64		counter;
 } atomic64_t;
 
-#ifndef C11_ATOMICS
-
-#include <urcu/uatomic.h>
-
-#if (CAA_BITS_PER_LONG != 64)
-#define ATOMIC64_SPINLOCK
-#endif
-
-#define __ATOMIC_READ(p)		uatomic_read(p)
-#define __ATOMIC_SET(p, v)		uatomic_set(p, v)
-#define __ATOMIC_SET_RELEASE(p, v)	uatomic_set(p, v)
-#define __ATOMIC_ADD_RETURN(v, p)	uatomic_add_return(p, v)
-#define __ATOMIC_SUB_RETURN(v, p)	uatomic_sub_return(p, v)
-#define __ATOMIC_ADD(v, p)		uatomic_add(p, v)
-#define __ATOMIC_SUB(v, p)		uatomic_sub(p, v)
-#define __ATOMIC_INC(p)			uatomic_inc(p)
-#define __ATOMIC_DEC(p)			uatomic_dec(p)
-#define __ATOMIC_AND(v, p)		uatomic_and(p, v)
-#define __ATOMIC_OR(v, p)		uatomic_or(p, v)
-
-#define xchg(p, v)			uatomic_xchg(p, v)
-#define xchg_acquire(p, v)		uatomic_xchg(p, v)
-#define cmpxchg(p, old, new)		uatomic_cmpxchg(p, old, new)
-#define cmpxchg_acquire(p, old, new)	uatomic_cmpxchg(p, old, new)
-#define cmpxchg_release(p, old, new)	uatomic_cmpxchg(p, old, new)
-
-#define try_cmpxchg(p, _old, _new)				\
-({								\
-	typeof(*(_old)) _v = cmpxchg(p, *(_old), _new);		\
-	bool _ret = _v == *(_old);				\
-	*(_old) = _v;						\
-	_ret;							\
-})
-
-#define try_cmpxchg_acquire(p, _old, _new)			\
-	try_cmpxchg(p, _old, _new)
-
-#define smp_mb__before_atomic()		cmm_smp_mb__before_uatomic_add()
-#define smp_mb__after_atomic()		cmm_smp_mb__after_uatomic_add()
-#define smp_wmb()			cmm_smp_wmb()
-#define smp_rmb()			cmm_smp_rmb()
-#define smp_mb()			cmm_smp_mb()
-#define smp_read_barrier_depends()	cmm_smp_read_barrier_depends()
-#define smp_acquire__after_ctrl_dep()	cmm_smp_mb()
-
-#else /* C11_ATOMICS */
-
 #define __ATOMIC_READ(p)		__atomic_load_n(p,	__ATOMIC_RELAXED)
 #define __ATOMIC_SET(p, v)		__atomic_store_n(p, v,	__ATOMIC_RELAXED)
 #define __ATOMIC_SET_RELEASE(p, v)	__atomic_store_n(p, v,	__ATOMIC_RELEASE)
@@ -82,6 +35,11 @@ typedef struct {
 	__atomic_compare_exchange_n((p), old, new, false,	\
 				    __ATOMIC_SEQ_CST,		\
 				    __ATOMIC_SEQ_CST)
+
+#define try_cmpxchg_acquire(p, old, new)			\
+	__atomic_compare_exchange_n((p), old, new, false,	\
+				    __ATOMIC_ACQUIRE,		\
+				    __ATOMIC_RELAXED)
 
 #define cmpxchg(p, old, new)					\
 ({								\
@@ -109,7 +67,7 @@ typedef struct {
 								\
 	__atomic_compare_exchange_n((p), &__old, new, false,	\
 				    __ATOMIC_RELEASE,		\
-				    __ATOMIC_RELEASE);		\
+				    __ATOMIC_RELAXED);		\
 	__old;							\
 })
 
@@ -119,9 +77,7 @@ typedef struct {
 #define smp_rmb()		__atomic_thread_fence(__ATOMIC_SEQ_CST)
 #define smp_mb()		__atomic_thread_fence(__ATOMIC_SEQ_CST)
 #define smp_read_barrier_depends()
-
-#endif
-
+#define smp_acquire__after_ctrl_dep()	__atomic_thread_fence(__ATOMIC_SEQ_CST)
 #define smp_store_mb(var, value)  do { WRITE_ONCE(var, value); smp_mb(); } while (0)
 
 #define smp_load_acquire(p)						\
