@@ -110,11 +110,18 @@ static int readpage_bio_extend(struct btree_trans *trans,
 			if (!get_more)
 				break;
 
+			unsigned sectors_remaining = sectors_this_extent - bio_sectors(bio);
+
+			if (sectors_remaining < PAGE_SECTORS << mapping_min_folio_order(iter->mapping))
+				break;
+
+			unsigned order = ilog2(rounddown_pow_of_two(sectors_remaining) / PAGE_SECTORS);
+
 			folio = xa_load(&iter->mapping->i_pages, folio_offset);
 			if (folio && !xa_is_value(folio))
 				break;
 
-			folio = filemap_alloc_folio(readahead_gfp_mask(iter->mapping), 0);
+			folio = filemap_alloc_folio(readahead_gfp_mask(iter->mapping), order);
 			if (!folio)
 				break;
 
@@ -230,7 +237,8 @@ err:
 
 	if (ret) {
 		struct printbuf buf = PRINTBUF;
-		bch2_inum_offset_err_msg_trans(trans, &buf, inum, iter.pos.offset << 9);
+		lockrestart_do(trans,
+			bch2_inum_offset_err_msg_trans(trans, &buf, inum, iter.pos.offset << 9));
 		prt_printf(&buf, "read error %i from btree lookup", ret);
 		bch_err_ratelimited(c, "%s", buf.buf);
 		printbuf_exit(&buf);

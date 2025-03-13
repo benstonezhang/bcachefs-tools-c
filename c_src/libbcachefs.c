@@ -352,9 +352,9 @@ void bch2_super_write(int fd, struct bch_sb *sb)
 		if (sb->offset == BCH_SB_SECTOR) {
 			/* Write backup layout */
 
-			BUG_ON(bs > 4096);
+			unsigned buflen = max(bs, 4096);
 
-			char *buf = aligned_alloc(bs, bs);
+			char *buf = aligned_alloc(buflen, buflen);
 			xpread(fd, buf, bs, 4096 - bs);
 			memcpy(buf + bs - sizeof(sb->layout),
 			       &sb->layout,

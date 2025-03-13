@@ -1515,7 +1515,7 @@ static void __journal_write_alloc(struct journal *j,
  * @j:		journal object
  * @w:		journal buf (entry to be written)
  *
- * Returns: 0 on success, or -EROFS on failure
+ * Returns: 0 on success, or -BCH_ERR_insufficient_devices on failure
  */
 static int journal_write_alloc(struct journal *j, struct journal_buf *w)
 {
@@ -1624,8 +1624,7 @@ static CLOSURE_CALLBACK(journal_write_done)
 	} else {
 		bch2_devlist_to_replicas(&replicas.e, BCH_DATA_journal,
 					 w->devs_written);
-		if (bch2_mark_replicas(c, &replicas.e))
-			err = -EIO;
+		err = bch2_mark_replicas(c, &replicas.e);
 	}
 
 	if (err)
@@ -1640,6 +1639,21 @@ static CLOSURE_CALLBACK(journal_write_done)
 		j->err_seq	= seq;
 	w->write_done = true;
 
+	if (!j->free_buf || j->free_buf_size < w->buf_size) {
+		swap(j->free_buf,	w->data);
+		swap(j->free_buf_size,	w->buf_size);
+	}
+
+	if (w->data) {
+		void *buf = w->data;
+		w->data = NULL;
+		w->buf_size = 0;
+
+		spin_unlock(&j->lock);
+		kvfree(buf);
+		spin_lock(&j->lock);
+	}
+
 	bool completed = false;
 
 	for (seq = journal_last_unwritten_seq(j);
@@ -1649,7 +1663,7 @@ static CLOSURE_CALLBACK(journal_write_done)
 		if (!w->write_done)
 			break;
 
-		if (!j->err_seq && !JSET_NO_FLUSH(w->data)) {
+		if (!j->err_seq && !w->noflush) {
 			j->flushed_seq_ondisk = seq;
 			j->last_seq_ondisk = w->last_seq;
 
@@ -1973,7 +1987,7 @@ static int bch2_journal_write_pick_flush(struct journal *j, struct journal_buf *
 	 * write anything at all.
 	 */
 	if (error && test_bit(JOURNAL_need_flush_write, &j->flags))
-		return -EIO;
+		return error;
 
 	if (error ||
 	    w->noflush ||
