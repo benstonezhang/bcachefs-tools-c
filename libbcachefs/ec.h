@@ -99,15 +99,13 @@ static inline u64 stripe_lru_pos(const struct bch_stripe *s)
 	if (!s)
 		return 0;
 
-	unsigned blocks_empty = 0, blocks_nonempty = 0;
+	unsigned nr_data = s->nr_blocks - s->nr_redundant, blocks_empty = 0;
 
-	for (unsigned i = 0; i < s->nr_blocks; i++) {
-		blocks_empty	+=  !stripe_blockcount_get(s, i);
-		blocks_nonempty	+= !!stripe_blockcount_get(s, i);
-	}
+	for (unsigned i = 0; i < nr_data; i++)
+		blocks_empty += !stripe_blockcount_get(s, i);
 
 	/* Will be picked up by the stripe_delete worker */
-	if (!blocks_nonempty)
+	if (blocks_empty == nr_data)
 		return STRIPE_LRU_POS_EMPTY;
 
 	if (!blocks_empty)
@@ -251,7 +249,7 @@ int bch2_ec_read_extent(struct btree_trans *, struct bch_read_bio *, struct bkey
 
 void *bch2_writepoint_ec_buf(struct bch_fs *, struct write_point *);
 
-void bch2_ec_bucket_cancel(struct bch_fs *, struct open_bucket *);
+void bch2_ec_bucket_cancel(struct bch_fs *, struct open_bucket *, int);
 
 int bch2_ec_stripe_new_alloc(struct bch_fs *, struct ec_stripe_head *);
 
@@ -259,10 +257,6 @@ void bch2_ec_stripe_head_put(struct bch_fs *, struct ec_stripe_head *);
 struct ec_stripe_head *bch2_ec_stripe_head_get(struct btree_trans *,
 			unsigned, unsigned, unsigned,
 			enum bch_watermark, struct closure *);
-
-void bch2_stripes_heap_update(struct bch_fs *, struct stripe *, size_t);
-void bch2_stripes_heap_del(struct bch_fs *, struct stripe *, size_t);
-void bch2_stripes_heap_insert(struct bch_fs *, struct stripe *, size_t);
 
 void bch2_do_stripe_deletes(struct bch_fs *);
 void bch2_ec_do_stripe_creates(struct bch_fs *);
@@ -300,7 +294,6 @@ void bch2_fs_ec_flush(struct bch_fs *);
 
 int bch2_stripes_read(struct bch_fs *);
 
-void bch2_stripes_heap_to_text(struct printbuf *, struct bch_fs *);
 void bch2_new_stripes_to_text(struct printbuf *, struct bch_fs *);
 
 void bch2_fs_ec_exit(struct bch_fs *);

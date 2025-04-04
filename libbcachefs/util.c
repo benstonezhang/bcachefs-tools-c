@@ -270,7 +270,7 @@ static void __bch2_print_string_as_lines(const char *prefix, const char *lines,
 		locked = console_trylock();
 	}
 
-	while (1) {
+	while (*lines) {
 		p = strchrnul(lines, '\n');
 		printk("%s%.*s\n", prefix, (int) (p - lines), lines);
 		if (!*p)
@@ -653,19 +653,25 @@ int bch2_bio_alloc_pages(struct bio *bio, size_t size, gfp_t gfp_mask)
 	return 0;
 }
 
-size_t bch2_rand_range(size_t max)
+u64 bch2_get_random_u64_below(u64 ceil)
 {
-	size_t rand;
+	if (ceil <= U32_MAX)
+		return __get_random_u32_below(ceil);
 
-	if (!max)
-		return 0;
+	/* this is the same (clever) algorithm as in __get_random_u32_below() */
+	u64 rand = get_random_u64();
+	u64 mult = ceil * rand;
 
-	do {
-		rand = get_random_long();
-		rand &= roundup_pow_of_two(max) - 1;
-	} while (rand >= max);
+	if (unlikely(mult < ceil)) {
+		u64 bound;
+		div64_u64_rem(-ceil, ceil, &bound);
+		while (unlikely(mult < bound)) {
+			rand = get_random_u64();
+			mult = ceil * rand;
+		}
+	}
 
-	return rand;
+	return mul_u64_u64_shr(ceil, rand, 64);
 }
 
 void memcpy_to_bio(struct bio *dst, struct bvec_iter dst_iter, const void *src)
@@ -697,6 +703,27 @@ void memcpy_from_bio(void *dst, struct bio *src, struct bvec_iter src_iter)
 		dst += bv.bv_len;
 	}
 }
+
+#ifdef CONFIG_BCACHEFS_DEBUG
+void bch2_corrupt_bio(struct bio *bio)
+{
+	struct bvec_iter iter;
+	struct bio_vec bv;
+	unsigned offset = get_random_u32_below(bio->bi_iter.bi_size / sizeof(u64));
+
+	bio_for_each_segment(bv, bio, iter) {
+		unsigned u64s = bv.bv_len / sizeof(u64);
+
+		if (offset < u64s) {
+			u64 *segment = bvec_kmap_local(&bv);
+			segment[offset] = get_random_u64();
+			kunmap_local(segment);
+			return;
+		}
+		offset -= u64s;
+	}
+}
+#endif
 
 #if 0
 void eytzinger1_test(void)

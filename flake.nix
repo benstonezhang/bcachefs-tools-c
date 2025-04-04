@@ -11,19 +11,21 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    crane = {
-      url = "github:ipetkov/crane";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    crane.url = "github:ipetkov/crane";
 
-    fenix = {
-      url = "github:nix-community/fenix";
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
     flake-compat = {
       url = "github:edolstra/flake-compat";
       flake = false;
+    };
+
+    nix-github-actions = {
+      url = "github:nix-community/nix-github-actions";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
@@ -33,27 +35,31 @@
       nixpkgs,
       flake-parts,
       treefmt-nix,
-      fenix,
       crane,
-      ...
+      rust-overlay,
+      flake-compat,
+      nix-github-actions,
     }:
+    let
+      systems = nixpkgs.lib.filter (s: nixpkgs.lib.hasSuffix "-linux" s) nixpkgs.lib.systems.flakeExposed;
+    in
     flake-parts.lib.mkFlake { inherit inputs; } {
       imports = [ inputs.treefmt-nix.flakeModule ];
 
-      # can be extended, but these have proper binary cache support in nixpkgs
-      # as of writing.
-      systems = [
-        "aarch64-linux"
-        "x86_64-linux"
-        "i686-linux"
-      ];
+      flake = {
+        githubActions = nix-github-actions.lib.mkGithubMatrix {
+          # github actions supports fewer architectures
+          checks = nixpkgs.lib.getAttrs [ "aarch64-linux" "x86_64-linux" ] self.checks;
+        };
+      };
+
+      inherit systems;
 
       perSystem =
         {
           self',
           config,
           lib,
-          pkgs,
           system,
           ...
         }:
@@ -62,10 +68,13 @@
           inherit (lib.lists) findFirst;
           inherit (lib.strings) hasPrefix removePrefix substring;
 
+          pkgs = import nixpkgs {
+            inherit system;
+            overlays = [ (import rust-overlay) ];
+          };
+
           cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
           rustfmtToml = builtins.fromTOML (builtins.readFile ./rustfmt.toml);
-
-          craneLib = crane.mkLib pkgs;
 
           rev = self.shortRev or self.dirtyShortRev or (substring 0 8 self.lastModifiedDate);
           makefileVersion = removePrefix "VERSION=" (
@@ -73,108 +82,211 @@
           );
           version = "${makefileVersion}+${rev}";
 
-          commonArgs = {
-            inherit version;
-            src = self;
+          mkCommon =
+            {
+              crane,
+              pkgs,
+              rustVersion ? "latest",
 
-            env = {
-              PKG_CONFIG_SYSTEMD_SYSTEMDSYSTEMUNITDIR = "${placeholder "out"}/lib/systemd/system";
-              PKG_CONFIG_UDEV_UDEVDIR = "${placeholder "out"}/lib/udev";
+              # build time
+              buildPackages,
+              pkg-config,
+              rustPlatform,
+              stdenv,
+
+              # run time
+              keyutils,
+              libaio,
+              libsodium,
+              liburcu,
+              libuuid,
+              lz4,
+              udev,
+              zlib,
+              zstd,
+            }:
+            let
+              inherit (stdenv) cc hostPlatform;
+
+              craneLib = (crane.mkLib pkgs).overrideToolchain (
+                p: p.rust-bin.stable."${rustVersion}".minimal.override { extensions = [ "clippy" ]; }
+              );
+
+              args = {
+                inherit version;
+                src = self;
+                strictDeps = true;
+
+                env = {
+                  PKG_CONFIG_SYSTEMD_SYSTEMDSYSTEMUNITDIR = "${placeholder "out"}/lib/systemd/system";
+                  PKG_CONFIG_UDEV_UDEVDIR = "${placeholder "out"}/lib/udev";
+
+                  CARGO_BUILD_TARGET = hostPlatform.rust.rustcTargetSpec;
+                  "CARGO_TARGET_${hostPlatform.rust.cargoEnvVarTarget}_LINKER" = "${cc.targetPrefix}cc";
+                  HOST_CC = "${cc.nativePrefix}cc";
+                  TARGET_CC = "${cc.targetPrefix}cc";
+                };
+
+                makeFlags = [
+                  "INITRAMFS_DIR=${placeholder "out"}/etc/initramfs-tools"
+                  "PREFIX=${placeholder "out"}"
+                  "VERSION=${version}"
+                ];
+
+                dontStrip = true;
+
+                depsBuildBuild = [
+                  buildPackages.stdenv.cc
+                ];
+
+                nativeBuildInputs = [
+                  pkg-config
+                  rustPlatform.bindgenHook
+                ];
+
+                buildInputs = [
+                  keyutils
+                  libaio
+                  libsodium
+                  liburcu
+                  libuuid
+                  lz4
+                  udev
+                  zlib
+                  zstd
+                ];
+
+                meta = {
+                  description = "Userspace tools for bcachefs";
+                  license = lib.licenses.gpl2Only;
+                  mainProgram = "bcachefs";
+                };
+              };
+
+              cargoArtifacts = craneLib.buildDepsOnly args;
+            in
+            {
+              inherit args cargoArtifacts craneLib;
             };
+          common = pkgs.callPackage mkCommon { inherit crane; };
 
-            makeFlags = [
-              "INITRAMFS_DIR=${placeholder "out"}/etc/initramfs-tools"
-              "PREFIX=${placeholder "out"}"
-              "VERSION=${version}"
-            ];
+          mkPackage =
+            { common, name }:
+            common.craneLib.buildPackage (
+              common.args
+              // {
+                inherit (common) cargoArtifacts;
+                pname = name;
 
-            dontStrip = true;
+                enableParallelBuilding = true;
+                buildPhaseCargoCommand = ''
+                  make ''${enableParallelBuilding:+-j''${NIX_BUILD_CORES}} $makeFlags
+                '';
+                doNotPostBuildInstallCargoBinaries = true;
+                installPhaseCommand = ''
+                  make ''${enableParallelBuilding:+-j''${NIX_BUILD_CORES}} $makeFlags install
+                '';
 
-            nativeBuildInputs = with pkgs; [
-              pkg-config
-              rustPlatform.bindgenHook
-            ];
+                doInstallCheck = true;
+                installCheckPhase = ''
+                  runHook preInstallCheck
 
-            buildInputs = with pkgs; [
-              attr
-              keyutils
-              libaio
-              libsodium
-              liburcu
-              libuuid
-              lz4
-              udev
-              zlib
-              zstd
-            ];
+                  test "$($out/bin/bcachefs version)" = "${version}"
 
-            meta = {
-              description = "Userspace tools for bcachefs";
-              license = lib.licenses.gpl2Only;
-              mainProgram = "bcachefs";
-            };
-          };
+                  runHook postInstallCheck
+                '';
+              }
+            );
 
-          cargoArtifacts = craneLib.buildDepsOnly (commonArgs // { pname = cargoToml.package.name; });
+          mkPackages =
+            name: systems:
+            let
+              packagesForSystem =
+                crossSystem:
+                let
+                  localSystem = system;
+                  pkgs' = import nixpkgs {
+                    inherit crossSystem localSystem;
+                    overlays = [ (import rust-overlay) ];
+                  };
+
+                  common = pkgs'.callPackage mkCommon { inherit crane; };
+                  package = pkgs'.callPackage mkPackage { inherit common name; };
+                  packageFuse = package.overrideAttrs (
+                    final: prev: {
+                      makeFlags = prev.makeFlags ++ [ "BCACHEFS_FUSE=1" ];
+                      buildInputs = prev.buildInputs ++ [ pkgs'.fuse3 ];
+                    }
+                  );
+                in
+                [
+                  (lib.nameValuePair "${name}-${crossSystem}" package)
+                  (lib.nameValuePair "${name}-fuse-${crossSystem}" packageFuse)
+                ];
+            in
+            lib.listToAttrs (lib.flatten (map packagesForSystem systems));
         in
         {
-          packages.default = config.packages.bcachefs-tools;
-          packages.bcachefs-tools = craneLib.buildPackage (
-            commonArgs
+          packages =
+            let
+              inherit (cargoToml.package) name;
+            in
+            (mkPackages name systems)
             // {
-              inherit cargoArtifacts;
+              ${name} = config.packages."${name}-${system}";
+              "${name}-fuse" = config.packages."${name}-fuse-${system}";
+              default = config.packages.${name};
+            };
 
-              enableParallelBuilding = true;
-              buildPhaseCargoCommand = ''
-                make ''${enableParallelBuilding:+-j''${NIX_BUILD_CORES}} $makeFlags
-              '';
-              installPhaseCommand = ''
-                make ''${enableParallelBuilding:+-j''${NIX_BUILD_CORES}} $makeFlags install
-              '';
+          checks = {
+            inherit (config.packages)
+              bcachefs-tools
+              bcachefs-tools-fuse
+              bcachefs-tools-fuse-i686-linux
+              ;
 
-              doInstallCheck = true;
-              installCheckPhase = ''
-                runHook preInstallCheck
+            cargo-clippy = common.craneLib.cargoClippy (
+              common.args
+              // {
+                inherit (common) cargoArtifacts;
+                cargoClippyExtraArgs = "--all-targets --all-features -- --deny warnings";
+              }
+            );
 
-                test "$($out/bin/bcachefs version)" = "${version}"
+            # we have to build our own `craneLib.cargoTest`
+            cargo-test = common.craneLib.mkCargoDerivation (
+              common.args
+              // {
+                inherit (common) cargoArtifacts;
+                doCheck = true;
 
-                runHook postInstallCheck
-              '';
-            }
-          );
+                enableParallelChecking = true;
 
-          packages.bcachefs-tools-fuse = config.packages.bcachefs-tools.overrideAttrs (
-            final: prev: {
-              makeFlags = prev.makeFlags ++ [ "BCACHEFS_FUSE=1" ];
-              buildInputs = prev.buildInputs ++ [ pkgs.fuse3 ];
-            }
-          );
+                pnameSuffix = "-test";
+                buildPhaseCargoCommand = "";
+                checkPhaseCargoCommand = ''
+                  make ''${enableParallelChecking:+-j''${NIX_BUILD_CORES}} $makeFlags libbcachefs.a
+                  cargo test --profile release -- --nocapture
+                '';
+              }
+            );
 
-          checks.cargo-clippy = craneLib.cargoClippy (
-            commonArgs
-            // {
-              inherit cargoArtifacts;
-              cargoClippyExtraArgs = "--all-targets -- --deny warnings";
-            }
-          );
-
-          # we have to build our own `craneLib.cargoTest`
-          checks.cargo-test = craneLib.mkCargoDerivation (
-            commonArgs
-            // {
-              inherit cargoArtifacts;
-              doCheck = true;
-
-              enableParallelChecking = true;
-
-              pnameSuffix = "-test";
-              buildPhaseCargoCommand = "";
-              checkPhaseCargoCommand = ''
-                make ''${enableParallelChecking:+-j''${NIX_BUILD_CORES}} $makeFlags libbcachefs.a
-                cargo test --profile release -- --nocapture
-              '';
-            }
-          );
+            # cargo clippy with the current minimum supported rust version
+            # according to Cargo.toml
+            msrv =
+              let
+                rustVersion = cargoToml.package.rust-version;
+                common = pkgs.callPackage mkCommon { inherit crane rustVersion; };
+              in
+              common.craneLib.cargoClippy (
+                common.args
+                // {
+                  pname = "msrv";
+                  inherit (common) cargoArtifacts;
+                  cargoClippyExtraArgs = "--all-targets --all-features";
+                }
+              );
+          };
 
           devShells.default = pkgs.mkShell {
             inputsFrom = [
@@ -190,9 +302,12 @@
               cargo-audit
               cargo-outdated
               clang-tools
-              clippy
-              rust-analyzer
-              rustc
+              (rust-bin.stable.latest.minimal.override {
+                extensions = [
+                  "rust-analyzer"
+                  "rust-src"
+                ];
+              })
             ];
           };
 
@@ -204,7 +319,7 @@
               nixfmt.enable = true;
               rustfmt.edition = rustfmtToml.edition;
               rustfmt.enable = true;
-              rustfmt.package = fenix.packages.${system}.default.rustfmt;
+              rustfmt.package = pkgs.rust-bin.selectLatestNightlyWith (toolchain: toolchain.rustfmt);
             };
           };
         };

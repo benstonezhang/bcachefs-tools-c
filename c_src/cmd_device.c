@@ -47,11 +47,11 @@ static void device_add_usage(void)
 	puts("bcachefs device add - add a device to an existing filesystem\n"
 	     "Usage: bcachefs device add [OPTION]... filesystem device\n"
 	     "\n"
-	     "Options:\n"
-	     "  -S, --fs_size=size          Size of filesystem on device\n"
-	     "  -B, --bucket=size           Bucket size\n"
-	     "  -D, --discard               Enable discards\n"
-	     "  -l, --label=label           Disk label\n"
+	     "Options:\n");
+
+	bch2_opts_usage(OPT_FORMAT|OPT_DEVICE);
+
+	puts("  -l, --label=label           Disk label\n"
 	     "  -f, --force                 Use device even if it appears to already be formatted\n"
 	     "  -h, --help                  Display this help and exit\n"
 	     "\n"
@@ -61,9 +61,6 @@ static void device_add_usage(void)
 int cmd_device_add(int argc, char *argv[])
 {
 	static const struct option longopts[] = {
-		{ "fs_size",		required_argument,	NULL, 'S' },
-		{ "bucket",		required_argument,	NULL, 'B' },
-		{ "discard",		no_argument,		NULL, 'D' },
 		{ "label",		required_argument,	NULL, 'l' },
 		{ "force",		no_argument,		NULL, 'f' },
 		{ "help",		no_argument,		NULL, 'h' },
@@ -72,22 +69,31 @@ int cmd_device_add(int argc, char *argv[])
 	struct format_opts format_opts	= format_opts_default();
 	struct dev_opts dev_opts	= dev_opts_default();
 	bool force = false;
-	int opt;
 
-	while ((opt = getopt_long(argc, argv, "S:B:Dl:fh",
-				  longopts, NULL)) != -1)
-		switch (opt) {
-		case 'S':
-			if (bch2_strtoull_h(optarg, &dev_opts.size))
-				die("invalid filesystem size");
+	while (true) {
+		const struct bch_option *opt =
+			bch2_cmdline_opt_parse(argc, argv, OPT_FORMAT|OPT_DEVICE);
+		if (opt) {
+			unsigned id = opt - bch2_opt_table;
+			u64 v;
+			struct printbuf err = PRINTBUF;
+			int ret = bch2_opt_parse(NULL, opt, optarg, &v, &err);
+			if (ret)
+				die("invalid %s: %s", opt->attr.name, err.buf);
+
+			if (opt->flags & OPT_DEVICE)
+				bch2_opt_set_by_id(&dev_opts.opts, id, v);
+			else
+				die("got bch_opt of wrong type %s", opt->attr.name);
+
+			continue;
+		}
+
+		int optid = getopt_long(argc, argv, "S:B:Dl:fh", longopts, NULL);
+		if (optid == -1)
 			break;
-		case 'B':
-			if (bch2_strtoull_h(optarg, &dev_opts.bucket_size))
-				die("bad bucket_size %s", optarg);
-			break;
-		case 'D':
-			dev_opts.discard = true;
-			break;
+
+		switch (optid) {
 		case 'l':
 			dev_opts.label = strdup(optarg);
 			break;
@@ -97,7 +103,11 @@ int cmd_device_add(int argc, char *argv[])
 		case 'h':
 			device_add_usage();
 			exit(EXIT_SUCCESS);
+		case '?':
+			exit(EXIT_FAILURE);
+			break;
 		}
+}
 	args_shift(optind);
 
 	char *fs_path = arg_pop();
@@ -127,10 +137,11 @@ int cmd_device_add(int argc, char *argv[])
 	opt_set(fs_opts, btree_node_size,
 		read_file_u64(fs.sysfs_fd, "options/btree_node_size"));
 
-	struct bch_sb *sb = bch2_format(fs_opt_strs,
-					fs_opts,
-					format_opts,
-					&dev_opts, 1);
+	dev_opts_list devs = {};
+	darray_push(&devs, dev_opts);
+
+	struct bch_sb *sb = bch2_format(fs_opt_strs, fs_opts, format_opts, devs);
+	darray_exit(&devs);
 	free(sb);
 	bchu_disk_add(fs, dev_opts.path);
 	return 0;

@@ -60,6 +60,7 @@ fn handle_c_command(mut argv: Vec<String>, symlink_cmd: Option<&str>) -> i32 {
             "set-passphrase" => c::cmd_set_passphrase(argc, argv),
             "set-file-option" => c::cmd_setattr(argc, argv),
             "show-super" => c::cmd_show_super(argc, argv),
+            "recover-super" => c::cmd_recover_super(argc, argv),
             "unlock" => c::cmd_unlock(argc, argv),
             "version" => c::cmd_version(argc, argv),
 

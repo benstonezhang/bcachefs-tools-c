@@ -536,6 +536,7 @@ struct bch_dev {
 	 */
 	struct bch_member_cpu	mi;
 	atomic64_t		errors[BCH_MEMBER_ERROR_NR];
+	unsigned long		write_errors_start;
 
 	__uuid_t		uuid;
 	char			name[BDEVNAME_SIZE];
@@ -626,7 +627,8 @@ struct bch_dev {
 	x(topology_error)		\
 	x(errors_fixed)			\
 	x(errors_not_fixed)		\
-	x(no_invalid_checks)
+	x(no_invalid_checks)		\
+	x(discard_mount_opt_set)	\
 
 enum bch_fs_flags {
 #define x(n)		BCH_FS_##n,
@@ -978,7 +980,6 @@ struct bch_fs {
 	mempool_t		compress_workspace[BCH_COMPRESSION_OPT_NR];
 	size_t			zstd_workspace_size;
 
-	struct crypto_shash	*sha256;
 	struct crypto_sync_skcipher *chacha20;
 	struct crypto_shash	*poly1305;
 
@@ -1002,14 +1003,10 @@ struct bch_fs {
 	wait_queue_head_t	copygc_running_wq;
 
 	/* STRIPES: */
-	GENRADIX(struct stripe) stripes;
 	GENRADIX(struct gc_stripe) gc_stripes;
 
 	struct hlist_head	ec_stripes_new[32];
 	spinlock_t		ec_stripes_new_lock;
-
-	ec_stripes_heap		ec_stripes_heap;
-	struct mutex		ec_stripes_heap_lock;
 
 	/* ERASURE CODING */
 	struct list_head	ec_stripe_head_list;

@@ -22,6 +22,13 @@
 
 #include <linux/ioprio.h>
 
+static const char * const bch2_data_update_type_strs[] = {
+#define x(t, n, ...) [n] = #t,
+	BCH_DATA_UPDATE_TYPES()
+#undef x
+	NULL
+};
+
 static void bkey_put_dev_refs(struct bch_fs *c, struct bkey_s_c k)
 {
 	struct bkey_ptrs_c ptrs = bch2_bkey_ptrs_c(k);
@@ -181,6 +188,7 @@ static int __bch2_data_update_index_update(struct btree_trans *trans,
 		container_of(op, struct data_update, op);
 	struct keylist *keys = &op->insert_keys;
 	struct bkey_buf _new, _insert;
+	struct printbuf journal_msg = PRINTBUF;
 	int ret = 0;
 
 	bch2_bkey_buf_init(&_new);
@@ -354,7 +362,7 @@ restart_drop_extra_replicas:
 			printbuf_exit(&buf);
 
 			bch2_fatal_error(c);
-			ret = -EIO;
+			ret = -BCH_ERR_invalid_bkey;
 			goto out;
 		}
 
@@ -372,7 +380,12 @@ restart_drop_extra_replicas:
 			printbuf_exit(&buf);
 		}
 
-		ret =   bch2_insert_snapshot_whiteouts(trans, m->btree_id,
+		printbuf_reset(&journal_msg);
+		prt_str(&journal_msg, bch2_data_update_type_strs[m->type]);
+
+		ret =   bch2_trans_log_msg(trans, &journal_msg) ?:
+			bch2_trans_log_bkey(trans, m->btree_id, 0, m->k.k) ?:
+			bch2_insert_snapshot_whiteouts(trans, m->btree_id,
 						k.k->p, bkey_start_pos(&insert->k)) ?:
 			bch2_insert_snapshot_whiteouts(trans, m->btree_id,
 						k.k->p, insert->k.p) ?:
@@ -417,6 +430,7 @@ nowork:
 		goto next;
 	}
 out:
+	printbuf_exit(&journal_msg);
 	bch2_trans_iter_exit(trans, &iter);
 	bch2_bkey_buf_exit(&_insert, c);
 	bch2_bkey_buf_exit(&_new, c);
@@ -573,11 +587,13 @@ void bch2_data_update_opts_to_text(struct printbuf *out, struct bch_fs *c,
 
 	prt_str_indented(out, "extra replicas:\t");
 	prt_u64(out, data_opts->extra_replicas);
-	prt_newline(out);
 }
 
 void bch2_data_update_to_text(struct printbuf *out, struct data_update *m)
 {
+	prt_str(out, bch2_data_update_type_strs[m->type]);
+	prt_newline(out);
+
 	bch2_data_update_opts_to_text(out, m->op.c, &m->op.opts, &m->data_opts);
 	prt_newline(out);
 
@@ -639,40 +655,6 @@ int bch2_extent_drop_ptrs(struct btree_trans *trans,
 		bch2_trans_commit(trans, NULL, NULL, BCH_TRANS_COMMIT_no_enospc);
 }
 
-static bool can_allocate_without_blocking(struct bch_fs *c,
-					  struct data_update *m)
-{
-	if (unlikely(c->open_buckets_nr_free <= bch2_open_buckets_reserved(m->op.watermark)))
-		return false;
-
-	unsigned target = m->op.flags & BCH_WRITE_only_specified_devs
-		? m->op.target
-		: 0;
-	struct bch_devs_mask devs = target_rw_devs(c, BCH_DATA_user, target);
-
-	darray_for_each(m->op.devs_have, i)
-		__clear_bit(*i, devs.d);
-
-	rcu_read_lock();
-	unsigned nr_replicas = 0, i;
-	for_each_set_bit(i, devs.d, BCH_SB_MEMBERS_MAX) {
-		struct bch_dev *ca = bch2_dev_rcu(c, i);
-
-		struct bch_dev_usage usage;
-		bch2_dev_usage_read_fast(ca, &usage);
-
-		if (!dev_buckets_free(ca, usage, m->op.watermark))
-			continue;
-
-		nr_replicas += ca->mi.durability;
-		if (nr_replicas >= m->op.nr_replicas)
-			break;
-	}
-	rcu_read_unlock();
-
-	return nr_replicas >= m->op.nr_replicas;
-}
-
 int bch2_data_update_bios_init(struct data_update *m, struct bch_fs *c,
 			       struct bch_io_opts *io_opts)
 {
@@ -701,9 +683,48 @@ int bch2_data_update_bios_init(struct data_update *m, struct bch_fs *c,
 	}
 
 	rbio_init(&m->rbio.bio, c, *io_opts, NULL);
+	m->rbio.data_update		= true;
 	m->rbio.bio.bi_iter.bi_size	= buf_bytes;
 	m->rbio.bio.bi_iter.bi_sector	= bkey_start_offset(&m->k.k->k);
 	m->op.wbio.bio.bi_ioprio	= IOPRIO_PRIO_VALUE(IOPRIO_CLASS_IDLE, 0);
+	return 0;
+}
+
+static int can_write_extent(struct bch_fs *c, struct data_update *m)
+{
+	if ((m->op.flags & BCH_WRITE_alloc_nowait) &&
+	    unlikely(c->open_buckets_nr_free <= bch2_open_buckets_reserved(m->op.watermark)))
+		return -BCH_ERR_data_update_done_would_block;
+
+	unsigned target = m->op.flags & BCH_WRITE_only_specified_devs
+		? m->op.target
+		: 0;
+	struct bch_devs_mask devs = target_rw_devs(c, BCH_DATA_user, target);
+
+	darray_for_each(m->op.devs_have, i)
+		__clear_bit(*i, devs.d);
+
+	rcu_read_lock();
+	unsigned nr_replicas = 0, i;
+	for_each_set_bit(i, devs.d, BCH_SB_MEMBERS_MAX) {
+		struct bch_dev *ca = bch2_dev_rcu(c, i);
+
+		struct bch_dev_usage usage;
+		bch2_dev_usage_read_fast(ca, &usage);
+
+		if (!dev_buckets_free(ca, usage, m->op.watermark))
+			continue;
+
+		nr_replicas += ca->mi.durability;
+		if (nr_replicas >= m->op.nr_replicas)
+			break;
+	}
+	rcu_read_unlock();
+
+	if (!nr_replicas)
+		return -BCH_ERR_data_update_done_no_rw_devs;
+	if (nr_replicas < m->op.nr_replicas)
+		return -BCH_ERR_insufficient_devices;
 	return 0;
 }
 
@@ -734,6 +755,9 @@ int bch2_data_update_init(struct btree_trans *trans,
 
 	bch2_bkey_buf_init(&m->k);
 	bch2_bkey_buf_reassemble(&m->k, c, k);
+	m->type		= data_opts.btree_insert_flags & BCH_WATERMARK_copygc
+		? BCH_DATA_UPDATE_copygc
+		: BCH_DATA_UPDATE_rebalance;
 	m->btree_id	= btree_id;
 	m->data_opts	= data_opts;
 	m->ctxt		= ctxt;
@@ -827,11 +851,22 @@ int bch2_data_update_init(struct btree_trans *trans,
 		goto out_bkey_buf_exit;
 	}
 
-	if ((m->op.flags & BCH_WRITE_alloc_nowait) &&
-	    !can_allocate_without_blocking(c, m)) {
-		ret = -BCH_ERR_data_update_done_would_block;
+	/*
+	 * Check if the allocation will succeed, to avoid getting an error later
+	 * in bch2_write() -> bch2_alloc_sectors_start() and doing a useless
+	 * read:
+	 *
+	 * This guards against
+	 * - BCH_WRITE_alloc_nowait allocations failing (promotes)
+	 * - Destination target full
+	 * - Device(s) in destination target offline
+	 * - Insufficient durability available in destination target
+	 *   (i.e. trying to move a durability=2 replica to a target with a
+	 *   single durability=2 device)
+	 */
+	ret = can_write_extent(c, m);
+	if (ret)
 		goto out_bkey_buf_exit;
-	}
 
 	if (reserve_sectors) {
 		ret = bch2_disk_reservation_add(c, &m->op.res, reserve_sectors,

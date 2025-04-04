@@ -5,8 +5,8 @@
 #include "chardev.h"
 #include "dirent.h"
 #include "fs.h"
-#include "fs-common.h"
 #include "fs-ioctl.h"
+#include "namei.h"
 #include "quota.h"
 
 #include <linux/compat.h>
@@ -69,8 +69,9 @@ static int bch2_inode_flags_set(struct btree_trans *trans,
 		if (ret < 0)
 			return ret;
 
-		if (!bch2_request_incompat_feature(c,bcachefs_metadata_version_casefolding))
-			return -EOPNOTSUPP;
+		ret = bch2_request_incompat_feature(c,bcachefs_metadata_version_casefolding);
+		if (ret)
+			return ret;
 
 		bch2_check_set_feature(c, BCH_FEATURE_casefolding);
 #else
@@ -243,7 +244,7 @@ static int bch2_ioc_reinherit_attrs(struct bch_fs *c,
 	int ret = 0;
 	subvol_inum inum;
 
-	kname = kmalloc(BCH_NAME_MAX + 1, GFP_KERNEL);
+	kname = kmalloc(BCH_NAME_MAX, GFP_KERNEL);
 	if (!kname)
 		return -ENOMEM;
 
@@ -540,10 +541,12 @@ static long bch2_ioctl_subvolume_destroy(struct bch_fs *c, struct file *filp,
 		ret = -ENOENT;
 		goto err;
 	}
-	ret = __bch2_unlink(dir, victim, true);
+
+	ret =   inode_permission(file_mnt_idmap(filp), d_inode(victim), MAY_WRITE) ?:
+		__bch2_unlink(dir, victim, true);
 	if (!ret) {
 		fsnotify_rmdir(dir, victim);
-		d_delete(victim);
+		d_invalidate(victim);
 	}
 err:
 	inode_unlock(dir);

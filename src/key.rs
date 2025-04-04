@@ -4,10 +4,11 @@ use std::{
     io::{stdin, IsTerminal},
     mem,
     path::Path,
+    process::{Command, Stdio},
     ptr, thread,
     time::Duration,
 };
-use std::process::{Command, Stdio};
+
 use anyhow::{anyhow, ensure, Result};
 use bch_bindgen::{
     bcachefs::{self, bch_key, bch_sb_handle},
@@ -19,7 +20,7 @@ use rustix::termios;
 use uuid::Uuid;
 use zeroize::{ZeroizeOnDrop, Zeroizing};
 
-use crate::{c_str, ErrnoError};
+use crate::ErrnoError;
 
 const BCH_KEY_MAGIC: &[u8; 8] = b"bch**key";
 
@@ -72,13 +73,13 @@ impl KeyHandle {
     pub fn new(sb: &bch_sb_handle, passphrase: &Passphrase) -> Result<Self> {
         let key_name = Self::format_key_name(&sb.sb().uuid());
         let key_name = CStr::as_ptr(&key_name);
-        let key_type = c_str!("user");
+        let key_type = c"user";
 
         let (passphrase_key, _sb_key) = passphrase.check(sb)?;
 
         let key_id = unsafe {
             keyutils::add_key(
-                key_type,
+                key_type.as_ptr(),
                 key_name,
                 ptr::addr_of!(passphrase_key).cast(),
                 mem::size_of_val(&passphrase_key),
@@ -99,9 +100,9 @@ impl KeyHandle {
 
     fn search_keyring(keyring: i32, key_name: &CStr) -> Result<c_long> {
         let key_name = CStr::as_ptr(key_name);
-        let key_type = c_str!("user");
+        let key_type = c"user";
 
-        let key_id = unsafe { keyctl_search(keyring, key_type, key_name, 0) };
+        let key_id = unsafe { keyctl_search(keyring, key_type.as_ptr(), key_name, 0) };
 
         if key_id > 0 {
             info!("Found key in keyring");
@@ -165,7 +166,7 @@ impl Passphrase {
         Ok(if output.status.success() {
             match CString::new(output.stdout) {
                 Ok(cstr) => Ok(Self(cstr)),
-                Err(e) => Err(e.into())
+                Err(e) => Err(e.into()),
             }
         } else {
             Err(anyhow!("systemd-ask-password returned an error"))

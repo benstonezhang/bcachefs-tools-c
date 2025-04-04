@@ -30,7 +30,7 @@ static void set_option_usage(void)
 	     "Usage: bcachefs set-fs-option [OPTION].. device\n"
 	     "\n"
 	     "Options:\n");
-	bch2_opts_usage(OPT_MOUNT);
+	bch2_opts_usage(OPT_MOUNT|OPT_RUNTIME);
 	puts("  -d, --dev-idx               index for device specific options\n"
 	     "  -h, --help                  display this help and exit\n"
 	     "Report bugs to <linux-bcachefs@vger.kernel.org>");
@@ -111,16 +111,16 @@ int cmd_set_option(int argc, char *argv[])
 			if (!bch2_opt_defined_by_id(&new_opts, i))
 				continue;
 
-			ret = bch2_opt_check_may_set(c, i, v);
-			if (ret < 0) {
-				fprintf(stderr, "error setting %s: %i\n", opt->attr.name, ret);
-				continue;
-			}
-
 			if (!(opt->flags & (OPT_FS|OPT_DEVICE)))
 				fprintf(stderr, "Can't set option %s\n", opt->attr.name);
 
 			if (opt->flags & OPT_FS) {
+				ret = bch2_opt_check_may_set(c, NULL, i, v);
+				if (ret < 0) {
+					fprintf(stderr, "error setting %s: %i\n", opt->attr.name, ret);
+					continue;
+				}
+
 				bch2_opt_set_sb(c, NULL, opt, v);
 			}
 
@@ -130,6 +130,12 @@ int cmd_set_option(int argc, char *argv[])
 						struct bch_dev *ca = bch2_dev_tryget_noerror(c, *dev);
 						if (!ca) {
 							fprintf(stderr, "Couldn't look up device %u\n", *dev);
+							continue;
+						}
+
+						ret = bch2_opt_check_may_set(c, ca, i, v);
+						if (ret < 0) {
+							fprintf(stderr, "error setting %s: %i\n", opt->attr.name, ret);
 							continue;
 						}
 

@@ -3,6 +3,7 @@
 #define _BCACHEFS_IO_READ_H
 
 #include "bkey_buf.h"
+#include "btree_iter.h"
 #include "reflink.h"
 
 struct bch_read_bio {
@@ -35,18 +36,18 @@ struct bch_read_bio {
 	u16			flags;
 	union {
 	struct {
-	u16			promote:1,
+	u16			data_update:1,
+				promote:1,
 				bounce:1,
 				split:1,
 				have_ioref:1,
 				narrow_crcs:1,
-				hole:1,
 				saw_error:1,
-				retry:2,
 				context:2;
 	};
 	u16			_state;
 	};
+	s16			ret;
 
 	struct extent_ptr_decoded pick;
 
@@ -109,7 +110,6 @@ static inline int bch2_read_indirect_extent(struct btree_trans *trans,
 	x(retry_if_stale)		\
 	x(may_promote)			\
 	x(user_mapped)			\
-	x(data_update)			\
 	x(last_fragment)		\
 	x(must_bounce)			\
 	x(must_clone)			\
@@ -137,26 +137,27 @@ static inline void bch2_read_extent(struct btree_trans *trans,
 			enum btree_id data_btree, struct bkey_s_c k,
 			unsigned offset_into_extent, unsigned flags)
 {
-	__bch2_read_extent(trans, rbio, rbio->bio.bi_iter, read_pos,
-			   data_btree, k, offset_into_extent, NULL, flags, -1);
+	int ret = __bch2_read_extent(trans, rbio, rbio->bio.bi_iter, read_pos,
+				     data_btree, k, offset_into_extent, NULL, flags, -1);
+	/* __bch2_read_extent only returns errors if BCH_READ_in_retry is set */
+	WARN(ret, "unhandled error from __bch2_read_extent()");
 }
 
-void __bch2_read(struct bch_fs *, struct bch_read_bio *, struct bvec_iter,
-		 subvol_inum, struct bch_io_failures *, unsigned flags);
+int __bch2_read(struct btree_trans *, struct bch_read_bio *, struct bvec_iter,
+		subvol_inum, struct bch_io_failures *, unsigned flags);
 
 static inline void bch2_read(struct bch_fs *c, struct bch_read_bio *rbio,
 			     subvol_inum inum)
 {
-	struct bch_io_failures failed = { .nr = 0 };
-
 	BUG_ON(rbio->_state);
 
 	rbio->subvol = inum.subvol;
 
-	__bch2_read(c, rbio, rbio->bio.bi_iter, inum, &failed,
-		    BCH_READ_retry_if_stale|
-		    BCH_READ_may_promote|
-		    BCH_READ_user_mapped);
+	bch2_trans_run(c,
+		__bch2_read(trans, rbio, rbio->bio.bi_iter, inum, NULL,
+			    BCH_READ_retry_if_stale|
+			    BCH_READ_may_promote|
+			    BCH_READ_user_mapped));
 }
 
 static inline struct bch_read_bio *rbio_init_fragment(struct bio *bio,
@@ -164,11 +165,13 @@ static inline struct bch_read_bio *rbio_init_fragment(struct bio *bio,
 {
 	struct bch_read_bio *rbio = to_rbio(bio);
 
-	rbio->c		= orig->c;
-	rbio->_state	= 0;
-	rbio->split	= true;
-	rbio->parent	= orig;
-	rbio->opts	= orig->opts;
+	rbio->c			= orig->c;
+	rbio->_state		= 0;
+	rbio->flags		= 0;
+	rbio->ret		= 0;
+	rbio->split		= true;
+	rbio->parent		= orig;
+	rbio->opts		= orig->opts;
 	return rbio;
 }
 
@@ -182,6 +185,8 @@ static inline struct bch_read_bio *rbio_init(struct bio *bio,
 	rbio->start_time	= local_clock();
 	rbio->c			= c;
 	rbio->_state		= 0;
+	rbio->flags		= 0;
+	rbio->ret		= 0;
 	rbio->opts		= opts;
 	rbio->bio.bi_end_io	= end_io;
 	return rbio;

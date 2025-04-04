@@ -159,9 +159,9 @@ static void find_superblock_space(ranges extents,
 {
 	darray_for_each(extents, i) {
 		u64 start = round_up(max(256ULL << 10, i->start),
-				     dev->bucket_size << 9);
+				     dev->opts.bucket_size << 9);
 		u64 end = round_down(i->end,
-				     dev->bucket_size << 9);
+				     dev->opts.bucket_size << 9);
 
 		/* Need space for two superblocks: */
 		if (start + (opts.superblock_size << 9) * 2 <= end) {
@@ -209,38 +209,43 @@ static int migrate_fs(const char		*fs_path,
 	if (!S_ISDIR(stat.st_mode))
 		die("%s is not a directory", fs_path);
 
-	struct dev_opts dev = dev_opts_default();
+	dev_opts_list devs = {};
+	darray_push(&devs, dev_opts_default());
 
-	dev.path = dev_t_to_path(stat.st_dev);
-	dev.file = bdev_file_open_by_path(dev.path, BLK_OPEN_READ|BLK_OPEN_WRITE, &dev, NULL);
+	struct dev_opts *dev = &devs.data[0];
 
-	int ret = PTR_ERR_OR_ZERO(dev.file);
+	dev->path = dev_t_to_path(stat.st_dev);
+	dev->file = bdev_file_open_by_path(dev->path, BLK_OPEN_READ|BLK_OPEN_WRITE, dev, NULL);
+
+	int ret = PTR_ERR_OR_ZERO(dev->file);
 	if (ret < 0)
-		die("Error opening device to format %s: %s", dev.path, strerror(-ret));
-	dev.bdev = file_bdev(dev.file);
+		die("Error opening device to format %s: %s", dev->path, strerror(-ret));
+	dev->bdev = file_bdev(dev->file);
 
-	opt_set(fs_opts, block_size, get_blocksize(dev.bdev->bd_fd));
+	opt_set(fs_opts, block_size, get_blocksize(dev->bdev->bd_fd));
 
 	char *file_path = mprintf("%s/bcachefs", fs_path);
 	printf("Creating new filesystem on %s in space reserved at %s\n",
-	       dev.path, file_path);
+	       dev->path, file_path);
 
-	dev.size	= get_size(dev.bdev->bd_fd);
-	dev.bucket_size = bch2_pick_bucket_size(fs_opts, &dev);
-	dev.nbuckets	= dev.size / dev.bucket_size;
+	dev->fs_size		= get_size(dev->bdev->bd_fd);
+	opt_set(dev->opts, bucket_size, bch2_pick_bucket_size(fs_opts, devs));
 
-	bch2_check_bucket_size(fs_opts, &dev);
+	dev->nbuckets		= dev->fs_size / dev->opts.bucket_size;
+
+	bch2_check_bucket_size(fs_opts, dev);
 
 	u64 bcachefs_inum;
 	ranges extents = reserve_new_fs_space(file_path,
 				fs_opts.block_size >> 9,
-				get_size(dev.bdev->bd_fd) / 5,
+				get_size(dev->bdev->bd_fd) / 5,
 				&bcachefs_inum, stat.st_dev, force);
 
-	find_superblock_space(extents, format_opts, &dev);
+	find_superblock_space(extents, format_opts, dev);
 
-	struct bch_sb *sb = bch2_format(fs_opt_strs,
-					fs_opts, format_opts, &dev, 1);
+	struct bch_sb *sb = bch2_format(fs_opt_strs, fs_opts, format_opts, devs);
+	darray_exit(&devs);
+
 	u64 sb_offset = le64_to_cpu(sb->layout.sb_offset[0]);
 
 	if (format_opts.passphrase)
@@ -248,26 +253,20 @@ static int migrate_fs(const char		*fs_path,
 
 	free(sb);
 
-	struct bch_opts opts = bch2_opts_empty();
-	struct bch_fs *c = NULL;
-	char *path[1] = { dev.path };
+	char *path[1] = { dev->path };
 
+	struct bch_opts opts = bch2_opts_empty();
 	opt_set(opts, sb,	sb_offset);
 	opt_set(opts, nostart,	true);
 	opt_set(opts, noexcl,	true);
-	opt_set(opts, nostart, true);
 
-	c = bch2_fs_open(path, 1, opts);
+	struct bch_fs *c = bch2_fs_open(path, 1, opts);
 	if (IS_ERR(c))
 		die("Error opening new filesystem: %s", bch2_err_str(PTR_ERR(c)));
 
 	ret = bch2_buckets_nouse_alloc(c);
 	if (ret)
 		die("Error allocating buckets_nouse: %s", bch2_err_str(ret));
-
-	ret = bch2_fs_start(c);
-	if (IS_ERR(c))
-		die("Error starting new filesystem: %s", bch2_err_str(ret));
 
 	mark_unreserved_space(c, extents);
 
@@ -282,7 +281,10 @@ static int migrate_fs(const char		*fs_path,
 		.type		= BCH_MIGRATE_migrate,
 	};
 
-	copy_fs(c, fs_fd, fs_path, &s);
+	u64 reserve_start = round_up((format_opts.superblock_size * 2 + 8) << 9,
+				     dev->opts.bucket_size);
+
+	copy_fs(c, fs_fd, fs_path, &s, reserve_start);
 
 	bch2_fs_stop(c);
 
@@ -310,7 +312,7 @@ static int migrate_fs(const char		*fs_path,
 	       "filesystem. That file can be deleted once the old filesystem is\n"
 	       "no longer needed (and should be deleted prior to running\n"
 	       "bcachefs migrate-superblock)\n",
-	       sb_offset, dev.path, dev.path, sb_offset);
+	       sb_offset, dev->path, dev->path, sb_offset);
 	return 0;
 }
 
@@ -374,7 +376,7 @@ static void migrate_superblock_usage(void)
 int cmd_migrate_superblock(int argc, char *argv[])
 {
 	char *dev = NULL;
-	u64 offset = 0;
+	u64 sb_offset = 0;
 	int opt, ret;
 
 	while ((opt = getopt(argc, argv, "d:o:h")) != -1)
@@ -383,7 +385,7 @@ int cmd_migrate_superblock(int argc, char *argv[])
 				dev = optarg;
 				break;
 			case 'o':
-				ret = kstrtou64(optarg, 10, &offset);
+				ret = kstrtou64(optarg, 10, &sb_offset);
 				if (ret)
 					die("Invalid offset");
 				break;
@@ -395,29 +397,72 @@ int cmd_migrate_superblock(int argc, char *argv[])
 	if (!dev)
 		die("Please specify a device");
 
-	if (!offset)
+	if (!sb_offset)
 		die("Please specify offset of existing superblock");
 
 	int fd = xopen(dev, O_RDWR);
-	struct bch_sb *sb = __bch2_super_read(fd, offset);
+	struct bch_sb *sb = __bch2_super_read(fd, sb_offset);
+	unsigned sb_size = 1U << sb->layout.sb_max_size_bits;
 
 	if (sb->layout.nr_superblocks >= ARRAY_SIZE(sb->layout.sb_offset))
 		die("Can't add superblock: no space left in superblock layout");
 
-	unsigned i;
-	for (i = 0; i < sb->layout.nr_superblocks; i++)
-		if (le64_to_cpu(sb->layout.sb_offset[i]) == BCH_SB_SECTOR)
-			die("Superblock layout already has default superblock");
+	for (unsigned i = 0; i < sb->layout.nr_superblocks; i++)
+		if (le64_to_cpu(sb->layout.sb_offset[i]) == BCH_SB_SECTOR ||
+		    le64_to_cpu(sb->layout.sb_offset[i]) == BCH_SB_SECTOR + sb_size)
+			die("Superblock layout already has default superblocks");
 
-	memmove(&sb->layout.sb_offset[1],
+	memmove(&sb->layout.sb_offset[2],
 		&sb->layout.sb_offset[0],
 		sb->layout.nr_superblocks * sizeof(u64));
-	sb->layout.nr_superblocks++;
-
+	sb->layout.nr_superblocks += 2;
 	sb->layout.sb_offset[0] = cpu_to_le64(BCH_SB_SECTOR);
+	sb->layout.sb_offset[1] = cpu_to_le64(BCH_SB_SECTOR + sb_size);
+
+	/* also write first 0-3.5k bytes with zeroes, ensure we blow away old
+	 * superblock */
+	static const char zeroes[BCH_SB_SECTOR << 9];
+	xpwrite(fd, zeroes, BCH_SB_SECTOR << 9, 0, "zeroing start of disk");
 
 	bch2_super_write(fd, sb);
 	close(fd);
 
+	/* mark new superblocks */
+
+	struct bch_opts opts = bch2_opts_empty();
+	opt_set(opts, nostart,	true);
+	opt_set(opts, sb,	sb_offset);
+
+	struct bch_fs *c = bch2_fs_open(&dev, 1, opts);
+	ret =   PTR_ERR_OR_ZERO(c) ?:
+		bch2_buckets_nouse_alloc(c);
+	if (ret)
+		die("error opening filesystem: %s", bch2_err_str(ret));
+
+	struct bch_dev *ca = c->devs[0];
+	for (u64 b = 0; bucket_to_sector(ca, b) < BCH_SB_SECTOR + sb_size * 2; b++)
+		set_bit(b, ca->buckets_nouse);
+
+	ret = bch2_fs_start(c);
+	if (ret)
+		die("Error starting filesystem: %s", bch2_err_str(ret));
+
+	bch2_fs_stop(c);
+
+	opts = bch2_opts_empty();
+	opt_set(opts, fsck, true);
+	opt_set(opts, fix_errors, true);
+
+	/*
+	 * Hack: the free space counters are coming out wrong after marking the
+	 * new superblock, but it's just the device counters so it's
+	 * inconsequential:
+	 */
+
+	c = bch2_fs_open(&dev, 1, opts);
+	ret =   PTR_ERR_OR_ZERO(c);
+	if (ret)
+		die("error opening filesystem: %s", bch2_err_str(ret));
+	bch2_fs_stop(c);
 	return 0;
 }

@@ -28,6 +28,9 @@ struct {
 };
 
 void bch2_opt_strs_free(struct bch_opt_strs *);
+
+const struct bch_option *bch2_cmdline_opt_parse(int argc, char *argv[],
+						unsigned opt_types);
 struct bch_opt_strs bch2_cmdline_opts_get(int *, char *[], unsigned);
 struct bch_opts bch2_parse_opts(struct bch_opt_strs);
 void bch2_opts_usage(unsigned);
@@ -42,14 +45,24 @@ struct format_opts {
 	char		*source;
 };
 
+static inline unsigned bcachefs_kernel_version(void)
+{
+	return !access("/sys/module/bcachefs/parameters/version", R_OK)
+	    ? read_file_u64(AT_FDCWD, "/sys/module/bcachefs/parameters/version")
+	    : 0;
+}
+
 static inline struct format_opts format_opts_default()
 {
-	unsigned version = !access(   "/sys/module/bcachefs/parameters/version", R_OK)
-	    ? read_file_u64(AT_FDCWD, "/sys/module/bcachefs/parameters/version")
-	    : bcachefs_metadata_version_current;
+	/*
+	 * Ensure bcachefs module is loaded so we know the supported on disk
+	 * format version:
+	 */
+	system("modprobe bcachefs > /dev/null 2>&1");
 
 	return (struct format_opts) {
-		.version		= version,
+		.version		= bcachefs_kernel_version() ?:
+			bcachefs_metadata_version_current,
 		.superblock_size	= SUPERBLOCK_SIZE_DEFAULT,
 	};
 }
@@ -58,33 +71,35 @@ struct dev_opts {
 	struct file	*file;
 	struct block_device *bdev;
 	char		*path;
-	u64		size;		/* bytes*/
-	u64		bucket_size;	/* bytes */
-	const char	*label;
-	unsigned	data_allowed;
-	unsigned	durability;
-	bool		discard;
-
-	u64		nbuckets;
 
 	u64		sb_offset;
 	u64		sb_end;
+
+	u64		nbuckets;
+	u64		fs_size;
+
+	const char	*label; /* make this a bch_opt */
+
+	struct bch_opts	opts;
 };
+
+typedef DARRAY(struct dev_opts) dev_opts_list;
 
 static inline struct dev_opts dev_opts_default()
 {
-	return (struct dev_opts) {
-		.data_allowed		= ~0U << 2,
-		.durability		= 1,
-	};
+	return (struct dev_opts) { .opts = bch2_opts_empty() };
 }
 
-u64 bch2_pick_bucket_size(struct bch_opts, struct dev_opts *);
+void bch2_sb_layout_init(struct bch_sb_layout *,
+			 unsigned, unsigned, u64, u64);
+
+u64 bch2_pick_bucket_size(struct bch_opts, dev_opts_list);
 void bch2_check_bucket_size(struct bch_opts, struct dev_opts *);
 
 struct bch_sb *bch2_format(struct bch_opt_strs,
 			   struct bch_opts,
-			   struct format_opts, struct dev_opts *, size_t);
+			   struct format_opts,
+			   dev_opts_list devs);
 
 void bch2_super_write(int, struct bch_sb *);
 struct bch_sb *__bch2_super_read(int, u64);

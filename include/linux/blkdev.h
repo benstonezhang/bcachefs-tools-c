@@ -65,7 +65,10 @@ unsigned bdev_logical_block_size(struct block_device *bdev);
 sector_t get_capacity(struct gendisk *disk);
 
 struct blk_holder_ops {
-        void (*mark_dead)(struct block_device *bdev);
+        void (*mark_dead)(struct block_device *bdev, bool surprise);
+	void (*sync)(struct block_device *bdev);
+	int (*freeze)(struct block_device *bdev);
+	int (*thaw)(struct block_device *bdev);
 };
 
 static inline struct block_device *file_bdev(struct file *file)
@@ -80,7 +83,11 @@ int lookup_bdev(const char *path, dev_t *);
 
 struct super_block {
 	void			*s_fs_info;
+	struct rw_semaphore	s_umount;
 };
+
+static inline void evict_inodes(struct super_block *sb) {}
+static inline int sync_filesystem(struct super_block *) { return 0; }
 
 /*
  * File types

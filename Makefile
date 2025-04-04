@@ -1,4 +1,4 @@
-VERSION=1.20.0
+VERSION=1.25.0
 
 PREFIX?=/usr/local
 LIBEXECDIR?=$(PREFIX)/libexec
@@ -20,6 +20,13 @@ ifeq ($(BUILD_VERBOSE),1)
 else
   Q = @
   CARGO_CLEAN_ARGS = --quiet
+endif
+
+# when cross compiling, cargo places the built binary in a different location
+ifdef CARGO_BUILD_TARGET
+	BUILT_BIN = target/$(CARGO_BUILD_TARGET)/release/bcachefs
+else
+	BUILT_BIN = target/release/bcachefs
 endif
 
 # Prevent recursive expansions of $(CFLAGS) to avoid repeatedly performing
@@ -195,7 +202,7 @@ cmd_version.o : .version
 install: INITRAMFS_HOOK=$(INITRAMFS_DIR)/hooks/bcachefs
 install: INITRAMFS_SCRIPT=$(INITRAMFS_DIR)/scripts/local-premount/bcachefs
 install: bcachefs $(optional_install)
-	$(INSTALL) -m0755 -D target/release/bcachefs -t $(DESTDIR)$(ROOT_SBINDIR)
+	$(INSTALL) -m0755 -D $(BUILT_BIN)  -t $(DESTDIR)$(ROOT_SBINDIR)
 	$(INSTALL) -m0644 -D bcachefs.8    -t $(DESTDIR)$(PREFIX)/share/man/man8/
 	$(INSTALL) -m0755 -D initramfs/script $(DESTDIR)$(INITRAMFS_SCRIPT)
 	$(INSTALL) -m0755 -D initramfs/hook   $(DESTDIR)$(INITRAMFS_HOOK)

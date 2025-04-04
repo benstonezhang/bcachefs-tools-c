@@ -690,7 +690,8 @@ struct bch_sb_field_ext {
 	x(cached_backpointers,		BCH_VERSION(1, 21))		\
 	x(stripe_backpointers,		BCH_VERSION(1, 22))		\
 	x(stripe_lru,			BCH_VERSION(1, 23))		\
-	x(casefolding,			BCH_VERSION(1, 24))
+	x(casefolding,			BCH_VERSION(1, 24))		\
+	x(extent_flags,			BCH_VERSION(1, 25))
 
 enum bcachefs_metadata_version {
 	bcachefs_metadata_version_min = 9,
@@ -841,6 +842,7 @@ LE64_BITMASK(BCH_SB_SHARD_INUMS,	struct bch_sb, flags[3], 28, 29);
 LE64_BITMASK(BCH_SB_INODES_USE_KEY_CACHE,struct bch_sb, flags[3], 29, 30);
 LE64_BITMASK(BCH_SB_JOURNAL_FLUSH_DELAY,struct bch_sb, flags[3], 30, 62);
 LE64_BITMASK(BCH_SB_JOURNAL_FLUSH_DISABLED,struct bch_sb, flags[3], 62, 63);
+/* one free bit */
 LE64_BITMASK(BCH_SB_JOURNAL_RECLAIM_DELAY,struct bch_sb, flags[4], 0, 32);
 LE64_BITMASK(BCH_SB_JOURNAL_TRANSACTION_NAMES,struct bch_sb, flags[4], 32, 33);
 LE64_BITMASK(BCH_SB_NOCOW,		struct bch_sb, flags[4], 33, 34);
@@ -859,6 +861,8 @@ LE64_BITMASK(BCH_SB_VERSION_INCOMPAT,	struct bch_sb, flags[5], 32, 48);
 LE64_BITMASK(BCH_SB_VERSION_INCOMPAT_ALLOWED,
 					struct bch_sb, flags[5], 48, 64);
 LE64_BITMASK(BCH_SB_SHARD_INUMS_NBITS,	struct bch_sb, flags[6],  0,  4);
+LE64_BITMASK(BCH_SB_WRITE_ERROR_TIMEOUT,struct bch_sb, flags[6],  4, 14);
+LE64_BITMASK(BCH_SB_CSUM_ERR_RETRY_NR,	struct bch_sb, flags[6], 14, 20);
 
 static inline __u64 BCH_SB_COMPRESSION_TYPE(const struct bch_sb *sb)
 {
@@ -927,7 +931,8 @@ static inline void SET_BCH_SB_BACKGROUND_COMPRESSION_TYPE(struct bch_sb *sb, __u
 	 BIT_ULL(BCH_FEATURE_new_siphash)|		\
 	 BIT_ULL(BCH_FEATURE_btree_ptr_v2)|		\
 	 BIT_ULL(BCH_FEATURE_new_varint)|		\
-	 BIT_ULL(BCH_FEATURE_journal_no_flush))
+	 BIT_ULL(BCH_FEATURE_journal_no_flush)|		\
+	 BIT_ULL(BCH_FEATURE_incompat_version_field))
 
 enum bch_sb_feature {
 #define x(f, n) BCH_FEATURE_##f,
@@ -1138,7 +1143,8 @@ static inline __u64 __bset_magic(struct bch_sb *sb)
 	x(log,			9)		\
 	x(overwrite,		10)		\
 	x(write_buffer_keys,	11)		\
-	x(datetime,		12)
+	x(datetime,		12)		\
+	x(log_bkey,		13)
 
 enum bch_jset_entry_type {
 #define x(f, nr)	BCH_JSET_ENTRY_##f	= nr,
