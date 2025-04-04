@@ -208,6 +208,8 @@ struct file *bdev_file_open_by_path(const char *path, blk_mode_t mode,
 	bdev->queue.backing_dev_info = bdev->bd_disk->bdi;
 	bdev->bd_inode		= &bdev->__bd_inode;
 
+	mutex_init(&bdev->bd_holder_lock);
+
 	struct file *file = calloc(sizeof(*file), 1);
 	file->f_inode = bdev->bd_inode;
 

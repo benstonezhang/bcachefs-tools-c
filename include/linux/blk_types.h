@@ -10,6 +10,8 @@
 #include <linux/types.h>
 #include <linux/bvec.h>
 #include <linux/kobject.h>
+#include <linux/mutex.h>
+#include <linux/rwsem.h>
 
 struct bio_set;
 struct bio;
@@ -63,6 +65,8 @@ struct block_device {
 	struct gendisk *	bd_disk;
 	struct gendisk		__bd_disk;
 	int			bd_fd;
+
+	struct mutex		bd_holder_lock;
 };
 
 #define bdev_kobj(_bdev) (&((_bdev)->kobj))

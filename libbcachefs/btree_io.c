@@ -525,8 +525,6 @@ static void btree_err_msg(struct printbuf *out, struct bch_fs *c,
 	prt_printf(out, "at btree ");
 	bch2_btree_pos_to_text(out, c, b);
 
-	printbuf_indent_add(out, 2);
-
 	prt_printf(out, "\nnode offset %u/%u",
 		   b->written, btree_ptr_sectors_written(bkey_i_to_s_c(&b->key)));
 	if (i)
@@ -550,23 +548,7 @@ static int __btree_err(int ret,
 		       enum bch_sb_error_id err_type,
 		       const char *fmt, ...)
 {
-	struct printbuf out = PRINTBUF;
 	bool silent = c->curr_recovery_pass == BCH_RECOVERY_PASS_scan_for_btree_nodes;
-	va_list args;
-
-	btree_err_msg(&out, c, ca, b, i, k, b->written, write);
-
-	va_start(args, fmt);
-	prt_vprintf(&out, fmt, args);
-	va_end(args);
-
-	if (write == WRITE) {
-		bch2_print_string_as_lines(KERN_ERR, out.buf);
-		ret = c->opts.errors == BCH_ON_ERROR_continue
-			? 0
-			: -BCH_ERR_fsck_errors_not_fixed;
-		goto out;
-	}
 
 	if (!have_retry && ret == -BCH_ERR_btree_node_read_err_want_retry)
 		ret = -BCH_ERR_btree_node_read_err_fixable;
@@ -575,6 +557,29 @@ static int __btree_err(int ret,
 
 	if (!silent && ret != -BCH_ERR_btree_node_read_err_fixable)
 		bch2_sb_error_count(c, err_type);
+
+	struct printbuf out = PRINTBUF;
+	if (write != WRITE && ret != -BCH_ERR_btree_node_read_err_fixable) {
+		printbuf_indent_add_nextline(&out, 2);
+#ifdef BCACHEFS_LOG_PREFIX
+		prt_printf(&out, bch2_log_msg(c, ""));
+#endif
+	}
+
+	btree_err_msg(&out, c, ca, b, i, k, b->written, write);
+
+	va_list args;
+	va_start(args, fmt);
+	prt_vprintf(&out, fmt, args);
+	va_end(args);
+
+	if (write == WRITE) {
+		prt_str(&out, ", ");
+		ret = __bch2_inconsistent_error(c, &out)
+			? -BCH_ERR_fsck_errors_not_fixed
+			: 0;
+		silent = false;
+	}
 
 	switch (ret) {
 	case -BCH_ERR_btree_node_read_err_fixable:
@@ -585,25 +590,21 @@ static int __btree_err(int ret,
 		    ret != -BCH_ERR_fsck_ignore)
 			goto fsck_err;
 		ret = -BCH_ERR_fsck_fix;
-		break;
-	case -BCH_ERR_btree_node_read_err_want_retry:
-	case -BCH_ERR_btree_node_read_err_must_retry:
-		if (!silent)
-			bch2_print_string_as_lines(KERN_ERR, out.buf);
-		break;
+		goto out;
 	case -BCH_ERR_btree_node_read_err_bad_node:
-		if (!silent)
-			bch2_print_string_as_lines(KERN_ERR, out.buf);
-		ret = bch2_topology_error(c);
+		prt_str(&out, ", ");
+		ret = __bch2_topology_error(c, &out);
+		if (ret)
+			silent = false;
 		break;
 	case -BCH_ERR_btree_node_read_err_incompatible:
-		if (!silent)
-			bch2_print_string_as_lines(KERN_ERR, out.buf);
 		ret = -BCH_ERR_fsck_errors_not_fixed;
+		silent = false;
 		break;
-	default:
-		BUG();
 	}
+
+	if (!silent)
+		bch2_print_string_as_lines(KERN_ERR, out.buf);
 out:
 fsck_err:
 	printbuf_exit(&out);
@@ -817,7 +818,7 @@ static int validate_bset(struct bch_fs *c, struct bch_dev *ca,
 			     -BCH_ERR_btree_node_read_err_bad_node,
 			     c, ca, b, i, NULL,
 			     btree_node_bad_format,
-			     "invalid bkey format: %s\n  %s", buf1.buf,
+			     "invalid bkey format: %s\n%s", buf1.buf,
 			     (printbuf_reset(&buf2),
 			      bch2_bkey_format_to_text(&buf2, &bn->format), buf2.buf));
 		printbuf_reset(&buf1);
@@ -1187,7 +1188,7 @@ int bch2_btree_node_read_done(struct bch_fs *c, struct bch_dev *ca,
 			     le64_to_cpu(i->journal_seq),
 			     b->written, b->written + sectors, ptr_written);
 
-		b->written += sectors;
+		b->written = min(b->written + sectors, btree_sectors(c));
 
 		if (blacklisted && !first)
 			continue;
@@ -1329,6 +1330,7 @@ static void btree_node_read_work(struct work_struct *work)
 		bch_info(c, "retrying read");
 		ca = bch2_dev_get_ioref(c, rb->pick.ptr.dev, READ);
 		rb->have_ioref		= ca != NULL;
+		rb->start_time		= local_clock();
 		bio_reset(bio, NULL, REQ_OP_READ|REQ_SYNC|REQ_META);
 		bio->bi_iter.bi_sector	= rb->pick.ptr.offset;
 		bio->bi_iter.bi_size	= btree_buf_bytes(b);
@@ -1339,17 +1341,22 @@ static void btree_node_read_work(struct work_struct *work)
 		} else {
 			bio->bi_status = BLK_STS_REMOVED;
 		}
+
+		bch2_account_io_completion(ca, BCH_MEMBER_ERROR_read,
+					   rb->start_time, !bio->bi_status);
 start:
 		printbuf_reset(&buf);
 		bch2_btree_pos_to_text(&buf, c, b);
-		bch2_dev_io_err_on(ca && bio->bi_status, ca, BCH_MEMBER_ERROR_read,
-				   "btree read error %s for %s",
-				   bch2_blk_status_to_str(bio->bi_status), buf.buf);
+
+		if (ca && bio->bi_status)
+			bch_err_dev_ratelimited(ca,
+					"btree read error %s for %s",
+					bch2_blk_status_to_str(bio->bi_status), buf.buf);
 		if (rb->have_ioref)
 			percpu_ref_put(&ca->io_ref);
 		rb->have_ioref = false;
 
-		bch2_mark_io_failure(&failed, &rb->pick);
+		bch2_mark_io_failure(&failed, &rb->pick, false);
 
 		can_retry = bch2_bkey_pick_read_device(c,
 				bkey_i_to_s_c(&b->key),
@@ -1401,12 +1408,11 @@ static void btree_node_read_endio(struct bio *bio)
 	struct btree_read_bio *rb =
 		container_of(bio, struct btree_read_bio, bio);
 	struct bch_fs *c	= rb->c;
+	struct bch_dev *ca	= rb->have_ioref
+		? bch2_dev_have_ref(c, rb->pick.ptr.dev) : NULL;
 
-	if (rb->have_ioref) {
-		struct bch_dev *ca = bch2_dev_have_ref(c, rb->pick.ptr.dev);
-
-		bch2_latency_acct(ca, rb->start_time, READ);
-	}
+	bch2_account_io_completion(ca, BCH_MEMBER_ERROR_read,
+				   rb->start_time, !bio->bi_status);
 
 	queue_work(c->btree_read_complete_wq, &rb->work);
 }
@@ -2112,8 +2118,14 @@ out:
 	return;
 err:
 	set_btree_node_noevict(b);
-	bch2_fs_fatal_err_on(!bch2_err_matches(ret, EROFS), c,
-			     "writing btree node: %s", bch2_err_str(ret));
+
+	if (!bch2_err_matches(ret, EROFS)) {
+		struct printbuf buf = PRINTBUF;
+		prt_printf(&buf, "writing btree node: %s\n  ", bch2_err_str(ret));
+		bch2_btree_pos_to_text(&buf, c, b);
+		bch2_fs_fatal_error(c, "%s", buf.buf);
+		printbuf_exit(&buf);
+	}
 	goto out;
 }
 
@@ -2126,16 +2138,21 @@ static void btree_node_write_endio(struct bio *bio)
 	struct bch_fs *c		= wbio->c;
 	struct btree *b			= wbio->bio.bi_private;
 	struct bch_dev *ca		= wbio->have_ioref ? bch2_dev_have_ref(c, wbio->dev) : NULL;
-	unsigned long flags;
 
-	if (wbio->have_ioref)
-		bch2_latency_acct(ca, wbio->submit_time, WRITE);
+	bch2_account_io_completion(ca, BCH_MEMBER_ERROR_write,
+				   wbio->submit_time, !bio->bi_status);
 
-	if (!ca ||
-	    bch2_dev_io_err_on(bio->bi_status, ca, BCH_MEMBER_ERROR_write,
-			       "btree write error: %s",
-			       bch2_blk_status_to_str(bio->bi_status)) ||
-	    bch2_meta_write_fault("btree")) {
+	if (ca && bio->bi_status) {
+		struct printbuf buf = PRINTBUF;
+		prt_printf(&buf, "btree write error: %s\n  ",
+			   bch2_blk_status_to_str(bio->bi_status));
+		bch2_btree_pos_to_text(&buf, c, b);
+		bch_err_dev_ratelimited(ca, "%s", buf.buf);
+		printbuf_exit(&buf);
+	}
+
+	if (bio->bi_status) {
+		unsigned long flags;
 		spin_lock_irqsave(&c->btree_write_error_lock, flags);
 		bch2_dev_list_add_dev(&orig->failed, wbio->dev);
 		spin_unlock_irqrestore(&c->btree_write_error_lock, flags);

@@ -33,6 +33,7 @@ void bcachefs_usage(void)
 	     "Superblock commands:\n"
 	     "  format                   Format a new filesystem\n"
 	     "  show-super               Dump superblock information to stdout\n"
+	     "  recover-super            Attempt to recover overwritten superblock from backups\n"
 	     "  set-fs-option            Set a filesystem option\n"
 	     "  reset-counters           Reset all counters on an unmounted device\n"
 	     "\n"
@@ -92,9 +93,11 @@ void bcachefs_usage(void)
 	     "  list                     List filesystem metadata in textual form\n"
 	     "  list_journal             List contents of journal\n"
 	     "\n"
+#ifdef BCACHEFS_FUSE
 	     "FUSE:\n"
 	     "  fusemount                Mount a filesystem via FUSE\n"
 	     "\n"
+#endif
 	     "Miscellaneous:\n"
 	     "  completions              Generate shell completions\n"
 	     "  version                  Display the version of the invoked bcachefs tool\n");
@@ -115,16 +118,15 @@ int fs_cmds(int argc, char *argv[])
 {
 	char *cmd = pop_cmd(&argc, argv);
 
-	if (argc < 1) {
-		bcachefs_usage();
-		exit(EXIT_FAILURE);
-	}
+	if (argc < 1)
+		return fs_usage();
 	if (!strcmp(cmd, "usage"))
 		return cmd_fs_usage(argc, argv);
 	if (!strcmp(cmd, "top"))
 		return cmd_fs_top(argc, argv);
 
-	return 0;
+	fs_usage();
+	return -EINVAL;
 }
 
 int device_cmds(int argc, char *argv[])
@@ -150,7 +152,8 @@ int device_cmds(int argc, char *argv[])
 	if (!strcmp(cmd, "resize-journal"))
 		return cmd_device_resize_journal(argc, argv);
 
-	return 0;
+	device_usage();
+	return -EINVAL;
 }
 
 int data_cmds(int argc, char *argv[])
@@ -166,7 +169,8 @@ int data_cmds(int argc, char *argv[])
 	if (!strcmp(cmd, "job"))
 		return cmd_data_job(argc, argv);
 
-	return 0;
+	data_usage();
+	return -EINVAL;
 }
 
 int subvolume_cmds(int argc, char *argv[])

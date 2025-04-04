@@ -232,7 +232,7 @@ int bch2_alloc_v3_validate(struct bch_fs *c, struct bkey_s_c k,
 	int ret = 0;
 
 	bkey_fsck_err_on(bch2_alloc_unpack_v3(&u, k),
-			 c, alloc_v2_unpack_error,
+			 c, alloc_v3_unpack_error,
 			 "unpack error");
 fsck_err:
 	return ret;
@@ -589,6 +589,8 @@ iter_err:
 
 int bch2_alloc_read(struct bch_fs *c)
 {
+	down_read(&c->state_lock);
+
 	struct btree_trans *trans = bch2_trans_get(c);
 	struct bch_dev *ca = NULL;
 	int ret;
@@ -652,6 +654,7 @@ int bch2_alloc_read(struct bch_fs *c)
 	bch2_dev_put(ca);
 	bch2_trans_put(trans);
 
+	up_read(&c->state_lock);
 	bch_err_fn(c, ret);
 	return ret;
 }
@@ -673,8 +676,7 @@ static int __need_discard_or_freespace_err(struct btree_trans *trans,
 	bch2_bkey_val_to_text(&buf, c, alloc_k);
 
 	int ret = __bch2_fsck_err(NULL, trans, flags, err_id,
-				  "bucket incorrectly %sset in %s btree\n"
-				  "  %s",
+				  "bucket incorrectly %sset in %s btree\n%s",
 				  set ? "" : "un",
 				  bch2_btree_id_str(btree),
 				  buf.buf);
@@ -777,14 +779,12 @@ static inline int bch2_dev_data_type_accounting_mod(struct btree_trans *trans, s
 						    s64 delta_sectors,
 						    s64 delta_fragmented, unsigned flags)
 {
-	struct disk_accounting_pos acc = {
-		.type = BCH_DISK_ACCOUNTING_dev_data_type,
-		.dev_data_type.dev		= ca->dev_idx,
-		.dev_data_type.data_type	= data_type,
-	};
 	s64 d[3] = { delta_buckets, delta_sectors, delta_fragmented };
 
-	return bch2_disk_accounting_mod(trans, &acc, d, 3, flags & BTREE_TRIGGER_gc);
+	return bch2_disk_accounting_mod2(trans, flags & BTREE_TRIGGER_gc,
+					 d, dev_data_type,
+					 .dev		= ca->dev_idx,
+					 .data_type	= data_type);
 }
 
 int bch2_alloc_key_to_dev_counters(struct btree_trans *trans, struct bch_dev *ca,
@@ -837,7 +837,7 @@ int bch2_trigger_alloc(struct btree_trans *trans,
 
 	struct bch_dev *ca = bch2_dev_bucket_tryget(c, new.k->p);
 	if (!ca)
-		return -EIO;
+		return -BCH_ERR_trigger_alloc;
 
 	struct bch_alloc_v4 old_a_convert;
 	const struct bch_alloc_v4 *old_a = bch2_alloc_to_v4(old, &old_a_convert);
@@ -1029,9 +1029,9 @@ fsck_err:
 	bch2_dev_put(ca);
 	return ret;
 invalid_bucket:
-	bch2_fs_inconsistent(c, "reference to invalid bucket\n  %s",
+	bch2_fs_inconsistent(c, "reference to invalid bucket\n%s",
 			     (bch2_bkey_val_to_text(&buf, c, new.s_c), buf.buf));
-	ret = -EIO;
+	ret = -BCH_ERR_trigger_alloc;
 	goto err;
 }
 
@@ -1203,8 +1203,7 @@ int bch2_check_alloc_key(struct btree_trans *trans,
 
 	if (fsck_err_on(a->gen != alloc_gen(k, gens_offset),
 			trans, bucket_gens_key_wrong,
-			"incorrect gen in bucket_gens btree (got %u should be %u)\n"
-			"  %s",
+			"incorrect gen in bucket_gens btree (got %u should be %u)\n%s",
 			alloc_gen(k, gens_offset), a->gen,
 			(printbuf_reset(&buf),
 			 bch2_bkey_val_to_text(&buf, c, alloc_k), buf.buf))) {
@@ -1262,7 +1261,7 @@ int bch2_check_alloc_hole_freespace(struct btree_trans *trans,
 	if (fsck_err_on(k.k->type != KEY_TYPE_set,
 			trans, freespace_hole_missing,
 			"hole in alloc btree missing in freespace btree\n"
-			"  device %llu buckets %llu-%llu",
+			"device %llu buckets %llu-%llu",
 			freespace_iter->pos.inode,
 			freespace_iter->pos.offset,
 			end->offset)) {
@@ -1421,7 +1420,7 @@ int bch2_check_discard_freespace_key(struct btree_trans *trans, struct btree_ite
 	    (state == BCH_DATA_free &&
 	     genbits != alloc_freespace_genbits(*a))) {
 		if (fsck_err(trans, need_discard_freespace_key_bad,
-			     "%s\n  incorrectly set at %s:%llu:%llu:0 (free %u, genbits %llu should be %llu)",
+			     "%s\nincorrectly set at %s:%llu:%llu:0 (free %u, genbits %llu should be %llu)",
 			     (bch2_bkey_val_to_text(&buf, c, alloc_k), buf.buf),
 			     bch2_btree_id_str(iter->btree_id),
 			     iter->pos.inode,
@@ -1502,7 +1501,7 @@ int bch2_check_bucket_gens_key(struct btree_trans *trans,
 	struct bch_dev *ca = bch2_dev_tryget_noerror(c, k.k->p.inode);
 	if (!ca) {
 		if (fsck_err(trans, bucket_gens_to_invalid_dev,
-			     "bucket_gens key for invalid device:\n  %s",
+			     "bucket_gens key for invalid device:\n%s",
 			     (bch2_bkey_val_to_text(&buf, c, k), buf.buf)))
 			ret = bch2_btree_delete_at(trans, iter, 0);
 		goto out;
@@ -1511,7 +1510,7 @@ int bch2_check_bucket_gens_key(struct btree_trans *trans,
 	if (fsck_err_on(end <= ca->mi.first_bucket ||
 			start >= ca->mi.nbuckets,
 			trans, bucket_gens_to_invalid_buckets,
-			"bucket_gens key for invalid buckets:\n  %s",
+			"bucket_gens key for invalid buckets:\n%s",
 			(bch2_bkey_val_to_text(&buf, c, k), buf.buf))) {
 		ret = bch2_btree_delete_at(trans, iter, 0);
 		goto out;
@@ -1714,8 +1713,7 @@ static int bch2_check_alloc_to_lru_ref(struct btree_trans *trans,
 
 	if (fsck_err_on(!a->io_time[READ],
 			trans, alloc_key_cached_but_read_time_zero,
-			"cached bucket with read_time 0\n"
-			"  %s",
+			"cached bucket with read_time 0\n%s",
 		(printbuf_reset(&buf),
 		 bch2_bkey_val_to_text(&buf, c, alloc_k), buf.buf))) {
 		struct bkey_i_alloc_v4 *a_mut =
@@ -1806,6 +1804,19 @@ struct discard_buckets_state {
 	u64		discarded;
 };
 
+/*
+ * This is needed because discard is both a filesystem option and a device
+ * option, and mount options are supposed to apply to that mount and not be
+ * persisted, i.e. if it's set as a mount option we can't propagate it to the
+ * device.
+ */
+static inline bool discard_opt_enabled(struct bch_fs *c, struct bch_dev *ca)
+{
+	return test_bit(BCH_FS_discard_mount_opt_set, &c->flags)
+		? c->opts.discard
+		: ca->mi.discard;
+}
+
 static int bch2_discard_one_bucket(struct btree_trans *trans,
 				   struct bch_dev *ca,
 				   struct btree_iter *need_discard_iter,
@@ -1869,7 +1880,7 @@ static int bch2_discard_one_bucket(struct btree_trans *trans,
 		s->discarded++;
 		*discard_pos_done = iter.pos;
 
-		if (ca->mi.discard && !c->opts.nochanges) {
+		if (discard_opt_enabled(c, ca) && !c->opts.nochanges) {
 			/*
 			 * This works without any other locks because this is the only
 			 * thread that removes items from the need_discard tree

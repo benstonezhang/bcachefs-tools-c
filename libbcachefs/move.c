@@ -101,13 +101,25 @@ static void move_free(struct moving_io *io)
 static void move_write_done(struct bch_write_op *op)
 {
 	struct moving_io *io = container_of(op, struct moving_io, write.op);
+	struct bch_fs *c = op->c;
 	struct moving_context *ctxt = io->write.ctxt;
 
-	if (io->write.op.error)
-		ctxt->write_error = true;
+	if (op->error) {
+		if (trace_io_move_write_fail_enabled()) {
+			struct printbuf buf = PRINTBUF;
 
-	atomic_sub(io->write_sectors, &io->write.ctxt->write_sectors);
-	atomic_dec(&io->write.ctxt->write_ios);
+			bch2_write_op_to_text(&buf, op);
+			prt_printf(&buf, "ret\t%s\n", bch2_err_str(op->error));
+			trace_io_move_write_fail(c, buf.buf);
+			printbuf_exit(&buf);
+		}
+		this_cpu_inc(c->counters[BCH_COUNTER_io_move_write_fail]);
+
+		ctxt->write_error = true;
+	}
+
+	atomic_sub(io->write_sectors, &ctxt->write_sectors);
+	atomic_dec(&ctxt->write_ios);
 	move_free(io);
 	closure_put(&ctxt->cl);
 }
@@ -125,8 +137,8 @@ static void move_write(struct moving_io *io)
 				     &ctxt->stats->sectors_error_corrected);
 	}
 
-	if (unlikely(io->write.rbio.bio.bi_status ||
-		     io->write.rbio.hole ||
+	if (unlikely(io->write.rbio.ret ||
+		     io->write.rbio.bio.bi_status ||
 		     io->write.data_opts.scrub)) {
 		move_free(io);
 		return;
@@ -359,7 +371,6 @@ int bch2_move_extent(struct moving_context *ctxt,
 			   bkey_start_pos(k.k),
 			   iter->btree_id, k, 0,
 			   NULL,
-			   BCH_READ_data_update|
 			   BCH_READ_last_fragment,
 			   data_opts.scrub ?  data_opts.read_dev : -1);
 	return 0;
@@ -517,6 +528,37 @@ int bch2_move_ratelimit(struct moving_context *ctxt)
 	return 0;
 }
 
+/*
+ * Move requires non extents iterators, and there's also no need for it to
+ * signal indirect_extent_missing_error:
+ */
+static struct bkey_s_c bch2_lookup_indirect_extent_for_move(struct btree_trans *trans,
+					    struct btree_iter *iter,
+					    struct bkey_s_c_reflink_p p)
+{
+	if (unlikely(REFLINK_P_ERROR(p.v)))
+		return bkey_s_c_null;
+
+	struct bpos reflink_pos = POS(0, REFLINK_P_IDX(p.v));
+
+	bch2_trans_iter_init(trans, iter,
+			     BTREE_ID_reflink, reflink_pos,
+			     BTREE_ITER_not_extents);
+
+	struct bkey_s_c k = bch2_btree_iter_peek(iter);
+	if (!k.k || bkey_err(k)) {
+		bch2_trans_iter_exit(trans, iter);
+		return k;
+	}
+
+	if (bkey_lt(reflink_pos, bkey_start_pos(k.k))) {
+		bch2_trans_iter_exit(trans, iter);
+		return bkey_s_c_null;
+	}
+
+	return k;
+}
+
 static int bch2_move_data_btree(struct moving_context *ctxt,
 				struct bpos start,
 				struct bpos end,
@@ -550,6 +592,7 @@ static int bch2_move_data_btree(struct moving_context *ctxt,
 	bch2_trans_begin(trans);
 	bch2_trans_iter_init(trans, &iter, btree_id, start,
 			     BTREE_ITER_prefetch|
+			     BTREE_ITER_not_extents|
 			     BTREE_ITER_all_snapshots);
 
 	if (ctxt->rate)
@@ -580,17 +623,16 @@ static int bch2_move_data_btree(struct moving_context *ctxt,
 		    k.k->type == KEY_TYPE_reflink_p &&
 		    REFLINK_P_MAY_UPDATE_OPTIONS(bkey_s_c_to_reflink_p(k).v)) {
 			struct bkey_s_c_reflink_p p = bkey_s_c_to_reflink_p(k);
-			s64 offset_into_extent	= iter.pos.offset - bkey_start_offset(k.k);
 
 			bch2_trans_iter_exit(trans, &reflink_iter);
-			k = bch2_lookup_indirect_extent(trans, &reflink_iter, &offset_into_extent, p, true, 0);
+			k = bch2_lookup_indirect_extent_for_move(trans, &reflink_iter, p);
 			ret = bkey_err(k);
 			if (bch2_err_matches(ret, BCH_ERR_transaction_restart))
 				continue;
 			if (ret)
 				break;
 
-			if (bkey_deleted(k.k))
+			if (!k.k)
 				goto next_nondata;
 
 			/*
@@ -712,7 +754,6 @@ static int __bch2_move_data_phys(struct moving_context *ctxt,
 	struct btree_iter iter = {}, bp_iter = {};
 	struct bkey_buf sk;
 	struct bkey_s_c k;
-	unsigned sectors_moved = 0;
 	struct bkey_buf last_flushed;
 	int ret = 0;
 
@@ -816,7 +857,7 @@ static int __bch2_move_data_phys(struct moving_context *ctxt,
 		if (!bp.v->level)
 			ret = bch2_move_extent(ctxt, bucket_in_flight, &iter, k, io_opts, data_opts);
 		else if (!data_opts.scrub)
-			ret = bch2_btree_node_rewrite_key(trans, bp.v->btree_id, bp.v->level, k.k->p, 0);
+			ret = bch2_btree_node_rewrite_pos(trans, bp.v->btree_id, bp.v->level, k.k->p, 0);
 		else
 			ret = bch2_btree_node_scrub(trans, bp.v->btree_id, bp.v->level, k, data_opts.read_dev);
 
@@ -834,7 +875,6 @@ static int __bch2_move_data_phys(struct moving_context *ctxt,
 
 		if (ctxt->stats)
 			atomic64_add(sectors, &ctxt->stats->sectors_seen);
-		sectors_moved += sectors;
 next:
 		bch2_btree_iter_advance(&bp_iter);
 	}
@@ -1253,17 +1293,17 @@ void bch2_move_stats_to_text(struct printbuf *out, struct bch_move_stats *stats)
 	prt_newline(out);
 	printbuf_indent_add(out, 2);
 
-	prt_printf(out, "keys moved:  %llu\n",	atomic64_read(&stats->keys_moved));
-	prt_printf(out, "keys raced:  %llu\n",	atomic64_read(&stats->keys_raced));
-	prt_printf(out, "bytes seen:  ");
+	prt_printf(out, "keys moved:\t%llu\n",	atomic64_read(&stats->keys_moved));
+	prt_printf(out, "keys raced:\t%llu\n",	atomic64_read(&stats->keys_raced));
+	prt_printf(out, "bytes seen:\t");
 	prt_human_readable_u64(out, atomic64_read(&stats->sectors_seen) << 9);
 	prt_newline(out);
 
-	prt_printf(out, "bytes moved: ");
+	prt_printf(out, "bytes moved:\t");
 	prt_human_readable_u64(out, atomic64_read(&stats->sectors_moved) << 9);
 	prt_newline(out);
 
-	prt_printf(out, "bytes raced: ");
+	prt_printf(out, "bytes raced:\t");
 	prt_human_readable_u64(out, atomic64_read(&stats->sectors_raced) << 9);
 	prt_newline(out);
 
@@ -1272,7 +1312,8 @@ void bch2_move_stats_to_text(struct printbuf *out, struct bch_move_stats *stats)
 
 static void bch2_moving_ctxt_to_text(struct printbuf *out, struct bch_fs *c, struct moving_context *ctxt)
 {
-	struct moving_io *io;
+	if (!out->nr_tabstops)
+		printbuf_tabstop_push(out, 32);
 
 	bch2_move_stats_to_text(out, ctxt->stats);
 	printbuf_indent_add(out, 2);
@@ -1292,6 +1333,7 @@ static void bch2_moving_ctxt_to_text(struct printbuf *out, struct bch_fs *c, str
 	printbuf_indent_add(out, 2);
 
 	mutex_lock(&ctxt->lock);
+	struct moving_io *io;
 	list_for_each_entry(io, &ctxt->ios, io_list)
 		bch2_data_update_inflight_to_text(out, &io->write);
 	mutex_unlock(&ctxt->lock);

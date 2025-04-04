@@ -161,7 +161,7 @@ static inline int journal_state_count(union journal_res_state s, int idx)
 static inline int journal_state_seq_count(struct journal *j,
 					  union journal_res_state s, u64 seq)
 {
-	if (journal_cur_seq(j) - seq <= JOURNAL_STATE_BUF_NR)
+	if (journal_cur_seq(j) - seq < JOURNAL_STATE_BUF_NR)
 		return journal_state_count(s, seq & JOURNAL_STATE_BUF_MASK);
 	else
 		return 0;
@@ -350,8 +350,10 @@ static inline int journal_res_get_fast(struct journal *j,
 
 		/*
 		 * Check if there is still room in the current journal
-		 * entry:
+		 * entry, smp_rmb() guarantees that reads from reservations.counter
+		 * occur before accessing cur_entry_u64s:
 		 */
+		smp_rmb();
 		if (new.cur_entry_offset + res->u64s > j->cur_entry_u64s)
 			return 0;
 
