@@ -269,7 +269,8 @@ do {									\
 
 #define bch2_fmt(_c, fmt)		bch2_log_msg(_c, fmt "\n")
 
-void bch2_print_str(struct bch_fs *, const char *);
+void bch2_print_str(struct bch_fs *, const char *, const char *);
+void bch2_print_str_nonblocking(struct bch_fs *, const char *, const char *);
 
 __printf(2, 3)
 void bch2_print_opts(struct bch_opts *, const char *, ...);
@@ -524,8 +525,8 @@ struct bch_dev {
 	struct percpu_ref	ref;
 #endif
 	struct completion	ref_completion;
-	struct percpu_ref	io_ref;
-	struct completion	io_ref_completion;
+	struct percpu_ref	io_ref[2];
+	struct completion	io_ref_completion[2];
 
 	struct bch_fs		*fs;
 
@@ -562,7 +563,8 @@ struct bch_dev {
 	unsigned long		*bucket_backpointer_mismatches;
 	unsigned long		*bucket_backpointer_empty;
 
-	struct bch_dev_usage __percpu	*usage;
+	struct bch_dev_usage_full __percpu
+				*usage;
 
 	/* Allocator: */
 	u64			alloc_cursor[3];
@@ -613,6 +615,7 @@ struct bch_dev {
 	x(accounting_replay_done)	\
 	x(may_go_rw)			\
 	x(rw)				\
+	x(rw_init_done)			\
 	x(was_rw)			\
 	x(stopping)			\
 	x(emergency_ro)			\
@@ -649,6 +652,9 @@ struct btree_transaction_stats {
 	unsigned		nr_max_paths;
 	unsigned		journal_entries_size;
 	unsigned		max_mem;
+#ifdef CONFIG_BCACHEFS_DEBUG
+	darray_trans_kmalloc_trace trans_kmalloc_trace;
+#endif
 	char			*max_paths_text;
 };
 
@@ -775,6 +781,7 @@ struct bch_fs {
 
 		u8		nr_devices;
 		u8		clean;
+		bool		multi_device; /* true if we've ever had more than one device */
 
 		u8		encryption_type;
 
@@ -787,6 +794,8 @@ struct bch_fs {
 		unsigned long	errors_silent[BITS_TO_LONGS(BCH_FSCK_ERR_MAX)];
 		u64		btrees_lost_data;
 	}			sb;
+	DARRAY(enum bcachefs_metadata_version)
+				incompat_versions_requested;
 
 #ifdef CONFIG_UNICODE
 	struct unicode_map	*cf_encoding;
@@ -871,7 +880,7 @@ struct bch_fs {
 	struct btree_write_buffer btree_write_buffer;
 
 	struct workqueue_struct	*btree_update_wq;
-	struct workqueue_struct	*btree_io_complete_wq;
+	struct workqueue_struct	*btree_write_complete_wq;
 	/* copygc needs its own workqueue for index updates.. */
 	struct workqueue_struct	*copygc_wq;
 	/*
@@ -980,8 +989,8 @@ struct bch_fs {
 	mempool_t		compress_workspace[BCH_COMPRESSION_OPT_NR];
 	size_t			zstd_workspace_size;
 
-	struct crypto_sync_skcipher *chacha20;
-	struct crypto_shash	*poly1305;
+	struct bch_key		chacha20_key;
+	bool			chacha20_key_set;
 
 	atomic64_t		key_version;
 

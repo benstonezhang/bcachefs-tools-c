@@ -112,14 +112,10 @@ u64 read_flag_list_or_die(char *opt, const char * const list[],
 	return v;
 }
 
-void build_fs(struct bch_fs *c, const char *src_path)
+static void build_fs(struct bch_fs *c, const char *src_path)
 {
 	struct copy_fs_state s = {};
 	int src_fd = xopen(src_path, O_RDONLY|O_NOATIME);
-	struct stat stat = xfstat(src_fd);
-
-	if (!S_ISDIR(stat.st_mode))
-		die("%s is not a directory", src_path);
 
 	copy_fs(c, src_fd, src_path, &s, 0);
 }
@@ -136,9 +132,6 @@ int cmd_format(int argc, char *argv[])
 
 	struct bch_opt_strs fs_opt_strs = {};
 	struct bch_opts fs_opts = bch2_opts_empty();
-
-	if (getenv("BCACHEFS_KERNEL_ONLY"))
-		initialize = false;
 
 	while (true) {
 		const struct bch_option *opt =
@@ -258,34 +251,43 @@ int cmd_format(int argc, char *argv[])
 	if (unconsumed_dev_option)
 		die("Options for devices apply to subsequent devices; got a device option with no device");
 
-	if (opts.version != bcachefs_metadata_version_current)
-		initialize = false;
-
 	if (!devices.nr)
 		die("Please supply a device");
+
+	if (opts.source && !initialize)
+		die("--source, --no_initialize are incompatible");
 
 	if (opts.encrypted && !no_passphrase) {
 		opts.passphrase = read_passphrase_twice("Enter passphrase: ");
 		initialize = false;
 	}
 
+	if (!opts.source) {
+		if (getenv("BCACHEFS_KERNEL_ONLY"))
+			initialize = false;
+
+		if (opts.version != bcachefs_metadata_version_current) {
+			printf("version mismatch, not initializing");
+			if (opts.source)
+				die("--source, --version are incompatible");
+			initialize = false;
+		}
+	}
+
 	darray_for_each(devices, dev) {
 		int ret = open_for_format(dev, force);
 		if (ret)
-			die("Error opening %s: %s", dev_opts.path, strerror(-ret));
+			die("Error opening %s: %s", dev->path, strerror(-ret));
 	}
 
 	struct bch_sb *sb = bch2_format(fs_opt_strs, fs_opts, opts, devices);
-	bch2_opt_strs_free(&fs_opt_strs);
 
 	if (!quiet) {
 		struct printbuf buf = PRINTBUF;
-
 		buf.human_readable_units = true;
 
 		bch2_sb_to_text(&buf, sb, false, 1 << BCH_SB_FIELD_members_v2);
 		printf("%s", buf.buf);
-
 		printbuf_exit(&buf);
 	}
 	free(sb);
@@ -295,41 +297,26 @@ int cmd_format(int argc, char *argv[])
 		free(opts.passphrase);
 	}
 
-	darray_exit(&devices);
-
-	/* don't skip initialization when we have to build an image from a source */
-	if (opts.source && !initialize) {
-		printf("Warning: Forcing the initialization because the source flag was supplied\n");
-		initialize = 1;
-	}
-
 	if (initialize) {
-		struct bch_opts mount_opts = bch2_opts_empty();
-
-
-		opt_set(mount_opts, verbose, verbose);
-
 		/*
 		 * Start the filesystem once, to allocate the journal and create
 		 * the root directory:
 		 */
 		struct bch_fs *c = bch2_fs_open(device_paths.data,
 						device_paths.nr,
-						mount_opts);
+						bch2_opts_empty());
 		if (IS_ERR(c))
 			die("error opening %s: %s", device_paths.data[0],
 			    bch2_err_str(PTR_ERR(c)));
 
-		if (opts.source) {
+		if (opts.source)
 			build_fs(c, opts.source);
-		}
-
 
 		bch2_fs_stop(c);
 	}
-
+	bch2_opt_strs_free(&fs_opt_strs);
+	darray_exit(&devices);
 	darray_exit(&device_paths);
-
 	return 0;
 }
 

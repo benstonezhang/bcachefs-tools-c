@@ -52,6 +52,12 @@ struct stat xstat(const char *);
 	_ret;								\
 })
 
+#define xclose(_fd)							\
+do {									\
+	if (close(_fd))							\
+		die("error closing fd: %m at %s:%u", __FILE__, __LINE__);\
+} while (0)
+
 void write_file_str(int, const char *, const char *);
 char *read_file_str(int, const char *);
 u64 read_file_u64(int, const char *);
@@ -182,5 +188,7 @@ struct bbpos_range bbpos_range_parse(char *);
 unsigned version_parse(char *);
 
 darray_str get_or_split_cmdline_devs(int argc, char *argv[]);
+
+char *pop_cmd(int *argc, char *argv[]);
 
 #endif /* _TOOLS_UTIL_H */

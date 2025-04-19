@@ -107,7 +107,7 @@ void write_file_str(int dirfd, const char *path, const char *str)
 	wrote = write(fd, str, len);
 	if (wrote != len)
 		die("read error: %m");
-	close(fd);
+	xclose(fd);
 }
 
 char *read_file_str(int dirfd, const char *path)
@@ -129,7 +129,7 @@ char *read_file_str(int dirfd, const char *path)
 		buf = NULL;
 	}
 
-	close(fd);
+	xclose(fd);
 
 	return buf;
 }
@@ -760,4 +760,15 @@ darray_str get_or_split_cmdline_devs(int argc, char *argv[])
 	}
 
 	return ret;
+}
+
+char *pop_cmd(int *argc, char *argv[])
+{
+	char *cmd = argv[1];
+	if (!(*argc < 2))
+		memmove(&argv[1], &argv[2], (*argc - 2) * sizeof(argv[0]));
+	(*argc)--;
+	argv[*argc] = NULL;
+
+	return cmd;
 }

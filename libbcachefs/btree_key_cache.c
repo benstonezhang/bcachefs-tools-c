@@ -13,6 +13,7 @@
 #include "trace.h"
 
 #include <linux/sched/mm.h>
+#include <linux/seq_buf.h>
 
 static inline bool btree_uses_pcpu_readers(enum btree_id id)
 {
@@ -287,6 +288,19 @@ err:
 	return ret;
 }
 
+static noinline_for_stack void do_trace_key_cache_fill(struct btree_trans *trans,
+						       struct btree_path *ck_path,
+						       struct bkey_s_c k)
+{
+	struct printbuf buf = PRINTBUF;
+
+	bch2_bpos_to_text(&buf, ck_path->pos);
+	prt_char(&buf, ' ');
+	bch2_bkey_val_to_text(&buf, trans->c, k);
+	trace_key_cache_fill(trans, buf.buf);
+	printbuf_exit(&buf);
+}
+
 static noinline int btree_key_cache_fill(struct btree_trans *trans,
 					 struct btree_path *ck_path,
 					 unsigned flags)
@@ -306,7 +320,7 @@ static noinline int btree_key_cache_fill(struct btree_trans *trans,
 			     BTREE_ITER_key_cache_fill|
 			     BTREE_ITER_cached_nofill);
 	iter.flags &= ~BTREE_ITER_with_journal;
-	k = bch2_btree_iter_peek_slot(&iter);
+	k = bch2_btree_iter_peek_slot(trans, &iter);
 	ret = bkey_err(k);
 	if (ret)
 		goto err;
@@ -320,18 +334,11 @@ static noinline int btree_key_cache_fill(struct btree_trans *trans,
 	if (ret)
 		goto err;
 
-	if (trace_key_cache_fill_enabled()) {
-		struct printbuf buf = PRINTBUF;
-
-		bch2_bpos_to_text(&buf, ck_path->pos);
-		prt_char(&buf, ' ');
-		bch2_bkey_val_to_text(&buf, trans->c, k);
-		trace_key_cache_fill(trans, buf.buf);
-		printbuf_exit(&buf);
-	}
+	if (trace_key_cache_fill_enabled())
+		do_trace_key_cache_fill(trans, ck_path, k);
 out:
 	/* We're not likely to need this iterator again: */
-	bch2_set_btree_iter_dontneed(&iter);
+	bch2_set_btree_iter_dontneed(trans, &iter);
 err:
 	bch2_trans_iter_exit(trans, &iter);
 	return ret;
@@ -412,7 +419,7 @@ static int btree_key_cache_flush_pos(struct btree_trans *trans,
 			     BTREE_ITER_intent);
 	b_iter.flags &= ~BTREE_ITER_with_key_cache;
 
-	ret = bch2_btree_iter_traverse(&c_iter);
+	ret = bch2_btree_iter_traverse(trans, &c_iter);
 	if (ret)
 		goto out;
 
@@ -444,7 +451,7 @@ static int btree_key_cache_flush_pos(struct btree_trans *trans,
 	    !test_bit(JOURNAL_space_low, &c->journal.flags))
 		commit_flags |= BCH_TRANS_COMMIT_no_journal_res;
 
-	struct bkey_s_c btree_k = bch2_btree_iter_peek_slot(&b_iter);
+	struct bkey_s_c btree_k = bch2_btree_iter_peek_slot(trans, &b_iter);
 	ret = bkey_err(btree_k);
 	if (ret)
 		goto err;
@@ -784,6 +791,18 @@ void bch2_fs_btree_key_cache_init_early(struct btree_key_cache *c)
 {
 }
 
+static void bch2_btree_key_cache_shrinker_to_text(struct seq_buf *s, struct shrinker *shrink)
+{
+	struct bch_fs *c = shrink->private_data;
+	struct btree_key_cache *bc = &c->btree_key_cache;
+	char *cbuf;
+	size_t buflen = seq_buf_get_buf(s, &cbuf);
+	struct printbuf out = PRINTBUF_EXTERN(cbuf, buflen);
+
+	bch2_btree_key_cache_to_text(&out, bc);
+	seq_buf_commit(s, out.pos);
+}
+
 int bch2_fs_btree_key_cache_init(struct btree_key_cache *bc)
 {
 	struct bch_fs *c = container_of(bc, struct bch_fs, btree_key_cache);
@@ -808,6 +827,7 @@ int bch2_fs_btree_key_cache_init(struct btree_key_cache *bc)
 	bc->shrink = shrink;
 	shrink->count_objects	= bch2_btree_key_cache_count;
 	shrink->scan_objects	= bch2_btree_key_cache_scan;
+	shrink->to_text		= bch2_btree_key_cache_shrinker_to_text;
 	shrink->batch		= 1 << 14;
 	shrink->seeks		= 0;
 	shrink->private_data	= c;

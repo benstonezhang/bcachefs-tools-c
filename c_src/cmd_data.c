@@ -10,19 +10,6 @@
 #include "cmds.h"
 #include "libbcachefs.h"
 
-int data_usage(void)
-{
-	puts("bcachefs data - manage filesystem data\n"
-	     "Usage: bcachefs data <CMD> [OPTIONS]\n"
-	     "\n"
-	     "Commands:\n"
-	     "  rereplicate                     Rereplicate degraded data\n"
-	     "  job                             Kick off low level data jobs\n"
-	     "\n"
-	     "Report bugs to <linux-bcachefs@vger.kernel.org>");
-	return 0;
-}
-
 static void data_rereplicate_usage(void)
 {
 	puts("bcachefs data rereplicate\n"
@@ -37,7 +24,7 @@ static void data_rereplicate_usage(void)
 	exit(EXIT_SUCCESS);
 }
 
-int cmd_data_rereplicate(int argc, char *argv[])
+static int cmd_data_rereplicate(int argc, char *argv[])
 {
 	int opt;
 
@@ -78,7 +65,7 @@ static void data_scrub_usage(void)
 	exit(EXIT_SUCCESS);
 }
 
-int cmd_data_scrub(int argc, char *argv[])
+static int cmd_data_scrub(int argc, char *argv[])
 {
 	static const struct option longopts[] = {
 		{ "metadata",		no_argument,		NULL, 'm' },
@@ -180,7 +167,7 @@ int cmd_data_scrub(int argc, char *argv[])
 
 			if (dev->progress_fd >= 0 &&
 			    read(dev->progress_fd, &e, sizeof(e)) != sizeof(e)) {
-				close(dev->progress_fd);
+				xclose(dev->progress_fd);
 				dev->progress_fd = -1;
 			}
 
@@ -199,7 +186,7 @@ int cmd_data_scrub(int argc, char *argv[])
 			}
 
 			if (dev->progress_fd >= 0 && e.ret) {
-				close(dev->progress_fd);
+				xclose(dev->progress_fd);
 				dev->progress_fd = -1;
 				dev->ret = e.ret;
 			}
@@ -283,7 +270,7 @@ static void data_job_usage(void)
 	exit(EXIT_SUCCESS);
 }
 
-int cmd_data_job(int argc, char *argv[])
+static int cmd_data_job(int argc, char *argv[])
 {
 	struct bch_ioctl_data op = {
 		.start_btree	= 0,
@@ -325,4 +312,34 @@ int cmd_data_job(int argc, char *argv[])
 		die("too many arguments");
 
 	return bchu_data(bcache_fs_open(fs_path), op);
+}
+
+static int data_usage(void)
+{
+	puts("bcachefs data - manage filesystem data\n"
+	     "Usage: bcachefs data <CMD> [OPTIONS]\n"
+	     "\n"
+	     "Commands:\n"
+	     "  rereplicate                     Rereplicate degraded data\n"
+	     "  job                             Kick off low level data jobs\n"
+	     "\n"
+	     "Report bugs to <linux-bcachefs@vger.kernel.org>");
+	return 0;
+}
+
+int data_cmds(int argc, char *argv[])
+{
+	char *cmd = pop_cmd(&argc, argv);
+
+	if (argc < 1)
+		return data_usage();
+	if (!strcmp(cmd, "rereplicate"))
+		return cmd_data_rereplicate(argc, argv);
+	if (!strcmp(cmd, "scrub"))
+		return cmd_data_scrub(argc, argv);
+	if (!strcmp(cmd, "job"))
+		return cmd_data_job(argc, argv);
+
+	data_usage();
+	return -EINVAL;
 }

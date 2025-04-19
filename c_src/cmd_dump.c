@@ -116,8 +116,7 @@ int cmd_dump(int argc, char *argv[])
 	opt_set(opts, read_only,	true);
 	opt_set(opts, nochanges,	true);
 	opt_set(opts, norecovery,	true);
-	opt_set(opts, degraded,		true);
-	opt_set(opts, very_degraded,	true);
+	opt_set(opts, degraded,		BCH_DEGRADED_very);
 	opt_set(opts, errors,		BCH_ON_ERROR_continue);
 	opt_set(opts, fix_errors,	FSCK_FIX_no);
 
@@ -172,7 +171,7 @@ int cmd_dump(int argc, char *argv[])
 		free(path);
 
 		dump_one_device(c, ca, fd, entire_journal);
-		close(fd);
+		xclose(fd);
 	}
 
 	up_read(&c->state_lock);

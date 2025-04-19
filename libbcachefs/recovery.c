@@ -32,7 +32,6 @@
 #include <linux/sort.h>
 #include <linux/stat.h>
 
-
 int bch2_btree_lost_data(struct bch_fs *c, enum btree_id btree)
 {
 	u64 b = BIT_ULL(btree);
@@ -113,11 +112,8 @@ static void kill_btree(struct bch_fs *c, enum btree_id btree)
 }
 
 /* for -o reconstruct_alloc: */
-static void bch2_reconstruct_alloc(struct bch_fs *c)
+void bch2_reconstruct_alloc(struct bch_fs *c)
 {
-	bch2_journal_log_msg(c, "dropping alloc info");
-	bch_info(c, "dropping and reconstructing all alloc info");
-
 	mutex_lock(&c->sb_lock);
 	struct bch_sb_field_ext *ext = bch2_sb_field_get(c->disk_sb.sb, ext);
 
@@ -159,6 +155,8 @@ static void bch2_reconstruct_alloc(struct bch_fs *c)
 
 	c->opts.recovery_passes |= bch2_recovery_passes_from_stable(le64_to_cpu(ext->recovery_passes_required[0]));
 
+	c->disk_sb.sb->features[0] &= ~cpu_to_le64(BIT_ULL(BCH_FEATURE_no_alloc_info));
+
 	bch2_write_super(c);
 	mutex_unlock(&c->sb_lock);
 
@@ -198,7 +196,7 @@ static int bch2_journal_replay_accounting_key(struct btree_trans *trans,
 	bch2_trans_node_iter_init(trans, &iter, k->btree_id, k->k->k.p,
 				  BTREE_MAX_DEPTH, k->level,
 				  BTREE_ITER_intent);
-	int ret = bch2_btree_iter_traverse(&iter);
+	int ret = bch2_btree_iter_traverse(trans, &iter);
 	if (ret)
 		goto out;
 
@@ -261,7 +259,7 @@ static int bch2_journal_replay_key(struct btree_trans *trans,
 	bch2_trans_node_iter_init(trans, &iter, k->btree_id, k->k->k.p,
 				  BTREE_MAX_DEPTH, k->level,
 				  iter_flags);
-	ret = bch2_btree_iter_traverse(&iter);
+	ret = bch2_btree_iter_traverse(trans, &iter);
 	if (ret)
 		goto out;
 
@@ -270,7 +268,7 @@ static int bch2_journal_replay_key(struct btree_trans *trans,
 		bch2_trans_iter_exit(trans, &iter);
 		bch2_trans_node_iter_init(trans, &iter, k->btree_id, k->k->k.p,
 					  BTREE_MAX_DEPTH, 0, iter_flags);
-		ret =   bch2_btree_iter_traverse(&iter) ?:
+		ret =   bch2_btree_iter_traverse(trans, &iter) ?:
 			bch2_btree_increase_depth(trans, iter.path, 0) ?:
 			-BCH_ERR_transaction_restart_nested;
 		goto out;
@@ -389,9 +387,9 @@ int bch2_journal_replay(struct bch_fs *c)
 	 * Now, replay any remaining keys in the order in which they appear in
 	 * the journal, unpinning those journal entries as we go:
 	 */
-	sort(keys_sorted.data, keys_sorted.nr,
-	     sizeof(keys_sorted.data[0]),
-	     journal_sort_seq_cmp, NULL);
+	sort_nonatomic(keys_sorted.data, keys_sorted.nr,
+		       sizeof(keys_sorted.data[0]),
+		       journal_sort_seq_cmp, NULL);
 
 	darray_for_each(keys_sorted, kp) {
 		cond_resched();
@@ -666,7 +664,7 @@ static bool check_version_upgrade(struct bch_fs *c)
 				     bch2_recovery_passes_from_stable(le64_to_cpu(passes)));
 		}
 
-		bch_info(c, "%s", buf.buf);
+		bch_notice(c, "%s", buf.buf);
 		printbuf_exit(&buf);
 
 		ret = true;
@@ -682,7 +680,7 @@ static bool check_version_upgrade(struct bch_fs *c)
 		bch2_version_to_text(&buf, c->sb.version_incompat_allowed);
 		prt_newline(&buf);
 
-		bch_info(c, "%s", buf.buf);
+		bch_notice(c, "%s", buf.buf);
 		printbuf_exit(&buf);
 
 		ret = true;
@@ -888,8 +886,26 @@ use_clean:
 	if (ret)
 		goto err;
 
-	if (c->opts.reconstruct_alloc)
+	if (!c->opts.read_only &&
+	    (c->sb.features & BIT_ULL(BCH_FEATURE_no_alloc_info))) {
+		bch_info(c, "mounting a filesystem with no alloc info read-write; will recreate");
+
 		bch2_reconstruct_alloc(c);
+	} else if (c->opts.reconstruct_alloc) {
+		bch2_journal_log_msg(c, "dropping alloc info");
+		bch_info(c, "dropping and reconstructing all alloc info");
+
+		bch2_reconstruct_alloc(c);
+	}
+
+	if (c->sb.features & BIT_ULL(BCH_FEATURE_no_alloc_info)) {
+		/* We can't go RW to fix errors without alloc info */
+		if (c->opts.fix_errors == FSCK_FIX_yes ||
+		    c->opts.fix_errors == FSCK_FIX_ask)
+			c->opts.fix_errors = FSCK_FIX_no;
+		if (c->opts.errors == BCH_ON_ERROR_fix_safe)
+			c->opts.errors = BCH_ON_ERROR_continue;
+	}
 
 	/*
 	 * After an unclean shutdown, skip then next few journal sequence
@@ -932,6 +948,10 @@ use_clean:
 	set_bit(BCH_FS_btree_running, &c->flags);
 
 	ret = bch2_sb_set_upgrade_extra(c);
+
+	ret = bch2_fs_resize_on_mount(c);
+	if (ret)
+		goto err;
 
 	ret = bch2_run_recovery_passes(c);
 	if (ret)
@@ -1125,7 +1145,10 @@ int bch2_fs_initialize(struct bch_fs *c)
 	 * journal_res_get() will crash if called before this has
 	 * set up the journal.pin FIFO and journal.cur pointer:
 	 */
-	bch2_fs_journal_start(&c->journal, 1);
+	ret = bch2_fs_journal_start(&c->journal, 1);
+	if (ret)
+		goto err;
+
 	set_bit(BCH_FS_accounting_replay_done, &c->flags);
 	bch2_journal_set_replay_done(&c->journal);
 

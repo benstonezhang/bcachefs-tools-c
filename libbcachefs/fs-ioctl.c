@@ -69,7 +69,7 @@ static int bch2_inode_flags_set(struct btree_trans *trans,
 		if (ret < 0)
 			return ret;
 
-		ret = bch2_request_incompat_feature(c,bcachefs_metadata_version_casefolding);
+		ret = bch2_request_incompat_feature(c, bcachefs_metadata_version_casefolding);
 		if (ret)
 			return ret;
 
@@ -535,10 +535,6 @@ static long bch2_ioctl_subvolume_destroy(struct bch_fs *c, struct file *filp,
 	dir = d_inode(path.dentry);
 	if (victim->d_sb->s_fs_info != c) {
 		ret = -EXDEV;
-		goto err;
-	}
-	if (!d_is_positive(victim)) {
-		ret = -ENOENT;
 		goto err;
 	}
 
