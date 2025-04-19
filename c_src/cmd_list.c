@@ -49,7 +49,7 @@ static int list_keys(struct bch_fs *fs)
 	bch2_trans_iter_init_outlined(trans, &iter, tree_id, pos_start,
 				      BTREE_ITER_prefetch | BTREE_ITER_all_snapshots);
 	while (1) {
-		struct bkey_s_c k = bch2_btree_iter_peek_and_restart_outlined(&iter);
+		struct bkey_s_c k = bch2_btree_iter_peek_and_restart_outlined(trans, &iter);
 		if (!k.k || bpos_cmp(k.k->p, pos_end) > 0)
 			break;
 		if ((bkey_type >= KEY_TYPE_MAX) || (k.k->type == bkey_type)) {
@@ -58,7 +58,7 @@ static int list_keys(struct bch_fs *fs)
 			puts(buf.buf);
 			printbuf_exit(&buf);
 		}
-		bch2_btree_iter_advance(&iter);
+		bch2_btree_iter_advance(trans, &iter);
 	}
 
 	bch2_trans_iter_exit(trans, &iter);
@@ -77,7 +77,7 @@ static int list_btree_formats(struct bch_fs *fs)
 				  list_level, BTREE_ITER_prefetch);
 
 	while (1) {
-		struct btree *b = bch2_btree_iter_peek_node_and_restart(&iter);
+		struct btree *b = bch2_btree_iter_peek_node_and_restart(trans, &iter);
 		if (bpos_cmp(b->key.k.p, pos_end) > 0)
 			break;
 		buf = PRINTBUF;
@@ -101,7 +101,7 @@ static int list_btree_nodes(struct bch_fs *fs)
 	bch2_trans_node_iter_init(trans, &iter, tree_id, pos_start, 0,
 				  list_level, BTREE_ITER_prefetch);
 	while (1) {
-		struct btree *b = bch2_btree_iter_peek_node_and_restart(&iter);
+		struct btree *b = bch2_btree_iter_peek_node_and_restart(trans, &iter);
 
 		if (bpos_cmp(b->key.k.p, pos_end) > 0)
 			break;
@@ -126,7 +126,7 @@ static int list_nodes_ondisk(struct bch_fs *fs)
 	bch2_trans_node_iter_init(trans, &iter, tree_id, pos_start, 0,
 				  list_level, BTREE_ITER_prefetch);
 	while (1) {
-		struct btree *b = bch2_btree_iter_peek_node_and_restart(&iter);
+		struct btree *b = bch2_btree_iter_peek_node_and_restart(trans, &iter);
 
 		if (bpos_cmp(b->key.k.p, pos_end) > 0)
 			break;
@@ -216,7 +216,6 @@ int cmd_list(int argc, char *argv[])
 	opt_set(opts, read_only, true);
 	opt_set(opts, norecovery, true);
 	opt_set(opts, degraded, true);
-	opt_set(opts, very_degraded, true);
 	opt_set(opts, errors, BCH_ON_ERROR_continue);
 
 	if (run_fsck) {

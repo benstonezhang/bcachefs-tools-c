@@ -189,3 +189,18 @@ int cmd_subvolume_snapshot(int argc, char *argv[])
     free(dir);
     return 0;
 }
+
+int subvolume_cmds(int argc, char *argv[])
+{
+	char *cmd = pop_cmd(&argc, argv);
+	if (argc < 1)
+		return subvolume_usage();
+	if (!strcmp(cmd, "create") || !strcmp(cmd, "new"))
+		return cmd_subvolume_create(argc, argv);
+	if (!strcmp(cmd, "delete") || !strcmp(cmd, "del"))
+		return cmd_subvolume_delete(argc, argv);
+	if (!strcmp(cmd, "snapshot") || !strcmp(cmd, "snap"))
+		return cmd_subvolume_snapshot(argc, argv);
+
+	return 0;
+}

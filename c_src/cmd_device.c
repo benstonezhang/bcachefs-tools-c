@@ -88,7 +88,7 @@ static int cmd_device_add(int argc, char *argv[])
 			exit(EXIT_FAILURE);
 			break;
 		}
-}
+	}
 	args_shift(optind);
 
 	char *fs_path = arg_pop();
