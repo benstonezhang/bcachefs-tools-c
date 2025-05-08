@@ -209,7 +209,7 @@ int cmd_list(int argc, char *argv[])
 		exit(8);
 	}
 
-	darray_str devs = get_or_split_cmdline_devs(argc, argv);
+	darray_const_str devs = get_or_split_cmdline_devs(argc, argv);
 
 	struct bch_opts opts = bch2_opts_empty();
 	opt_set(opts, nochanges, true);
@@ -225,7 +225,7 @@ int cmd_list(int argc, char *argv[])
 	if (verbose)
 		opt_set(opts, verbose, true);
 
-	struct bch_fs *fs = bch2_fs_open(devs.data, devs.nr, opts);
+	struct bch_fs *fs = bch2_fs_open(&devs, &opts);
 	if (IS_ERR(fs))
 		die("failed open filesystem");
 
