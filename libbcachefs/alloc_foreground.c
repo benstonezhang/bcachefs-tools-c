@@ -1255,15 +1255,15 @@ int bch2_alloc_sectors_start_trans(struct btree_trans *trans,
 	if (unlikely(ret))
 		return ret;
 
+	if (!IS_ENABLED(CONFIG_BCACHEFS_ERASURE_CODING))
+		erasure_code = false;
+
 	req->nr_replicas	= nr_replicas;
 	req->target		= target;
 	req->ec			= erasure_code;
 	req->watermark		= watermark;
 	req->flags		= flags;
 	req->devs_have		= devs_have;
-
-	if (!IS_ENABLED(CONFIG_BCACHEFS_ERASURE_CODING))
-		erasure_code = false;
 
 	BUG_ON(!nr_replicas || !nr_replicas_required);
 retry:
@@ -1338,6 +1338,8 @@ alloc_done:
 
 	open_bucket_for_each(c, &req->wp->ptrs, ob, i)
 		req->wp->sectors_free = min(req->wp->sectors_free, ob->sectors_free);
+
+	req->wp->sectors_free = rounddown(req->wp->sectors_free, block_sectors(c));
 
 	BUG_ON(!req->wp->sectors_free || req->wp->sectors_free == UINT_MAX);
 
@@ -1623,13 +1625,21 @@ static noinline void bch2_print_allocator_stuck(struct bch_fs *c)
 	printbuf_indent_sub(&buf, 2);
 	prt_newline(&buf);
 
-	for_each_online_member(c, ca) {
+	bch2_printbuf_make_room(&buf, 4096);
+
+	rcu_read_lock();
+	buf.atomic++;
+
+	for_each_online_member_rcu(c, ca) {
 		prt_printf(&buf, "Dev %u:\n", ca->dev_idx);
 		printbuf_indent_add(&buf, 2);
 		bch2_dev_alloc_debug_to_text(&buf, ca);
 		printbuf_indent_sub(&buf, 2);
 		prt_newline(&buf);
 	}
+
+	--buf.atomic;
+	rcu_read_unlock();
 
 	prt_printf(&buf, "Copygc debug:\n");
 	printbuf_indent_add(&buf, 2);

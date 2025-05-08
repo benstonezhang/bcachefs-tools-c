@@ -68,7 +68,7 @@ ssize_t read_string_list_or_die(const char *, const char * const[],
 u64 get_size(int);
 unsigned get_blocksize(int);
 struct dev_opts;
-int open_for_format(struct dev_opts *, bool);
+int open_for_format(struct dev_opts *, blk_mode_t, bool);
 
 bool ask_yn(void);
 
@@ -156,8 +156,8 @@ u32 crc32c(u32, const void *, size_t);
 
 char *dev_to_name(dev_t);
 char *dev_to_path(dev_t);
-struct mntent *dev_to_mount(char *);
-int dev_mounted(char *);
+struct mntent *dev_to_mount(const char *);
+int dev_mounted(const char *);
 char *fd_to_dev_model(int);
 
 #define args_shift(_nr)							\
@@ -187,7 +187,7 @@ struct bbpos_range bbpos_range_parse(char *);
 
 unsigned version_parse(char *);
 
-darray_str get_or_split_cmdline_devs(int argc, char *argv[]);
+darray_const_str get_or_split_cmdline_devs(int argc, char *argv[]);
 
 char *pop_cmd(int *argc, char *argv[]);
 

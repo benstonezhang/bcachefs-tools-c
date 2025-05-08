@@ -80,6 +80,10 @@ bool __bch2_count_fsck_err(struct bch_fs *, enum bch_sb_error_id, struct printbu
 #define bch2_count_fsck_err(_c, _err, ...)				\
 	__bch2_count_fsck_err(_c, BCH_FSCK_ERR_##_err, __VA_ARGS__)
 
+int bch2_fsck_err_opt(struct bch_fs *,
+		      enum bch_fsck_flags,
+		      enum bch_sb_error_id);
+
 __printf(5, 6) __cold
 int __bch2_fsck_err(struct bch_fs *, struct btree_trans *,
 		  enum bch_fsck_flags,
@@ -91,6 +95,7 @@ int __bch2_fsck_err(struct bch_fs *, struct btree_trans *,
 			_flags, BCH_FSCK_ERR_##_err_type, __VA_ARGS__)
 
 void bch2_flush_fsck_errs(struct bch_fs *);
+void bch2_free_fsck_errs(struct bch_fs *);
 
 #define fsck_err_wrap(_do)						\
 ({									\

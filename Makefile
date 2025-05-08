@@ -1,4 +1,4 @@
-VERSION=1.25.1
+VERSION=1.25.2
 
 PREFIX?=/usr/local
 LIBEXECDIR?=$(PREFIX)/libexec
@@ -33,6 +33,7 @@ CFLAGS+=-std=gnu11 -O2 -g -MMD -Wall -fPIC			\
 	-DNO_BCACHEFS_CHARDEV					\
 	-DNO_BCACHEFS_FS					\
 	-DNO_BCACHEFS_SYSFS					\
+	-DCONFIG_UNICODE					\
 	-DVERSION_STRING='"$(VERSION)"'				\
 	-D__SANE_USERSPACE_TYPES__				\
 	$(EXTRA_CFLAGS)
@@ -217,6 +218,7 @@ update-bcachefs-sources:
 	git rm -rf --ignore-unmatch libbcachefs
 	test -d libbcachefs || mkdir libbcachefs
 	cp $(LINUX_DIR)/fs/bcachefs/*.[ch] libbcachefs/
+	rm libbcachefs/fast_list.c libbcachefs/async_objs.c
 	git add libbcachefs/*.[ch]
 	git rm -f libbcachefs/mean_and_variance_test.c
 	cp $(LINUX_DIR)/include/linux/closure.h include/linux/

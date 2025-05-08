@@ -104,7 +104,7 @@ static int cmd_device_add(int argc, char *argv[])
 
 	struct bchfs_handle fs = bcache_fs_open(fs_path);
 
-	int ret = open_for_format(&dev_opts, force);
+	int ret = open_for_format(&dev_opts, 0, force);
 	if (ret)
 		die("Error opening %s: %s", dev_opts.path, strerror(-ret));
 
@@ -515,17 +515,21 @@ static int cmd_device_resize(int argc, char *argv[])
 	} else {
 		printf("Doing offline resize of %s\n", dev);
 
-		struct bch_fs *c = bch2_fs_open(&dev, 1, bch2_opts_empty());
+		darray_const_str devs = {};
+		darray_push(&devs, dev);
+
+		struct bch_opts opts = bch2_opts_empty();
+		struct bch_fs *c = bch2_fs_open(&devs, &opts);
 		if (IS_ERR(c))
 			die("error opening %s: %s", dev, bch2_err_str(PTR_ERR(c)));
 
 		struct bch_dev *resize = NULL;
 
-		for_each_online_member(c, ca) {
+		for_each_online_member(c, ca, 0) {
 			if (resize)
 				die("confused: more than one online device?");
 			resize = ca;
-			percpu_ref_get(&resize->io_ref[READ]);
+			enumerated_ref_get(&resize->io_ref[READ], 0);
 		}
 
 		u64 nbuckets = size / le16_to_cpu(resize->mi.bucket_size);
@@ -538,7 +542,7 @@ static int cmd_device_resize(int argc, char *argv[])
 		if (ret)
 			fprintf(stderr, "resize error: %s\n", bch2_err_str(ret));
 
-		percpu_ref_put(&resize->io_ref[READ]);
+		enumerated_ref_put(&resize->io_ref[READ], 0);
 		bch2_fs_stop(c);
 	}
 	return 0;
@@ -612,17 +616,21 @@ static int cmd_device_resize_journal(int argc, char *argv[])
 	} else {
 		printf("%s is offline - starting:\n", dev);
 
-		struct bch_fs *c = bch2_fs_open(&dev, 1, bch2_opts_empty());
+		darray_const_str devs = {};
+		darray_push(&devs, dev);
+
+		struct bch_opts opts = bch2_opts_empty();
+		struct bch_fs *c = bch2_fs_open(&devs, &opts);
 		if (IS_ERR(c))
 			die("error opening %s: %s", dev, bch2_err_str(PTR_ERR(c)));
 
 		struct bch_dev *resize = NULL;
 
-		for_each_online_member(c, ca) {
+		for_each_online_member(c, ca, 0) {
 			if (resize)
 				die("confused: more than one online device?");
 			resize = ca;
-			percpu_ref_get(&resize->io_ref[READ]);
+			enumerated_ref_get(&resize->io_ref[READ], 0);
 		}
 
 		u64 nbuckets = size / le16_to_cpu(resize->mi.bucket_size);
@@ -632,7 +640,7 @@ static int cmd_device_resize_journal(int argc, char *argv[])
 		if (ret)
 			fprintf(stderr, "resize error: %s\n", bch2_err_str(ret));
 
-		percpu_ref_put(&resize->io_ref[READ]);
+		enumerated_ref_put(&resize->io_ref[READ], 0);
 		bch2_fs_stop(c);
 	}
 	return 0;

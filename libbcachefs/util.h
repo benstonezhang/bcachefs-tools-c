@@ -419,6 +419,8 @@ static inline void bch2_maybe_corrupt_bio(struct bio *bio, unsigned ratio)
 #define bch2_maybe_corrupt_bio(...)	do {} while (0)
 #endif
 
+void bch2_bio_to_text(struct printbuf *, struct bio *);
+
 static inline void memcpy_u64s_small(void *dst, const void *src,
 				     unsigned u64s)
 {
@@ -688,8 +690,8 @@ static inline bool qstr_eq(const struct qstr l, const struct qstr r)
 	return l.len == r.len && !memcmp(l.name, r.name, l.len);
 }
 
-void bch2_darray_str_exit(darray_str *);
-int bch2_split_devs(const char *, darray_str *);
+void bch2_darray_str_exit(darray_const_str *);
+int bch2_split_devs(const char *, darray_const_str *);
 
 #ifdef __KERNEL__
 
@@ -738,5 +740,43 @@ static inline void memcpy_swab(void *_dst, void *_src, size_t len)
 	while (len--)
 		*--dst = *src++;
 }
+
+#define set_flags(_map, _in, _out)					\
+do {									\
+	unsigned _i;							\
+									\
+	for (_i = 0; _i < ARRAY_SIZE(_map); _i++)			\
+		if ((_in) & (1 << _i))					\
+			(_out) |= _map[_i];				\
+		else							\
+			(_out) &= ~_map[_i];				\
+} while (0)
+
+#define map_flags(_map, _in)						\
+({									\
+	unsigned _out = 0;						\
+									\
+	set_flags(_map, _in, _out);					\
+	_out;								\
+})
+
+#define map_flags_rev(_map, _in)					\
+({									\
+	unsigned _i, _out = 0;						\
+									\
+	for (_i = 0; _i < ARRAY_SIZE(_map); _i++)			\
+		if ((_in) & _map[_i]) {					\
+			(_out) |= 1 << _i;				\
+			(_in) &= ~_map[_i];				\
+		}							\
+	(_out);								\
+})
+
+#define map_defined(_map)						\
+({									\
+	unsigned _in = ~0;						\
+									\
+	map_flags_rev(_map, _in);					\
+})
 
 #endif /* _BCACHEFS_UTIL_H */

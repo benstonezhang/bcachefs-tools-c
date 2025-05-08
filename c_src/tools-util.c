@@ -183,7 +183,7 @@ unsigned get_blocksize(int fd)
 }
 
 /* Open a block device, do magic blkid stuff to probe for existing filesystems: */
-int open_for_format(struct dev_opts *dev, bool force)
+int open_for_format(struct dev_opts *dev, blk_mode_t mode, bool force)
 {
 	int blkid_version_code = blkid_get_library_version(NULL, NULL);
 	if (blkid_version_code < 2401) {
@@ -208,7 +208,7 @@ int open_for_format(struct dev_opts *dev, bool force)
 	size_t fs_type_len, fs_label_len;
 
 	dev->file = bdev_file_open_by_path(dev->path,
-				BLK_OPEN_READ|BLK_OPEN_WRITE|BLK_OPEN_EXCL|BLK_OPEN_BUFFERED,
+				BLK_OPEN_READ|BLK_OPEN_WRITE|BLK_OPEN_EXCL|BLK_OPEN_BUFFERED|mode,
 				dev, NULL);
 	int ret = PTR_ERR_OR_ZERO(dev->file);
 	if (ret < 0)
@@ -547,7 +547,7 @@ char *dev_to_path(dev_t dev)
 	return path;
 }
 
-struct mntent *dev_to_mount(char *dev)
+struct mntent *dev_to_mount(const char *dev)
 {
 	struct mntent *mnt, *ret = NULL;
 	FILE *f = setmntent("/proc/mounts", "r");
@@ -586,7 +586,7 @@ found:
 	return ret;
 }
 
-int dev_mounted(char *dev)
+int dev_mounted(const char *dev)
 {
 	struct mntent *mnt = dev_to_mount(dev);
 
@@ -748,9 +748,9 @@ unsigned version_parse(char *buf)
 	return BCH_VERSION(major, minor);
 }
 
-darray_str get_or_split_cmdline_devs(int argc, char *argv[])
+darray_const_str get_or_split_cmdline_devs(int argc, char *argv[])
 {
-	darray_str ret = {};
+	darray_const_str ret = {};
 
 	if (argc == 1) {
 		bch2_split_devs(argv[0], &ret);

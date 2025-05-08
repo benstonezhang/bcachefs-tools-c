@@ -3,6 +3,7 @@
 #include "bcachefs.h"
 #include "btree_key_cache.h"
 #include "btree_update.h"
+#include "enumerated_ref.h"
 #include "errcode.h"
 #include "error.h"
 #include "fs.h"
@@ -22,7 +23,7 @@ static int bch2_subvolume_missing(struct bch_fs *c, u32 subvolid)
 	prt_printf(&buf, "missing subvolume %u", subvolid);
 	bool print = bch2_count_fsck_err(c, subvol_missing, &buf);
 
-	int ret = bch2_run_explicit_recovery_pass_printbuf(c, &buf,
+	int ret = bch2_run_explicit_recovery_pass_persistent(c, &buf,
 					BCH_RECOVERY_PASS_check_inodes);
 	if (print)
 		bch2_print_str(c, KERN_ERR, buf.buf);
@@ -61,8 +62,8 @@ static int check_subvol(struct btree_trans *trans,
 	ret = bch2_snapshot_lookup(trans, snapid, &snapshot);
 
 	if (bch2_err_matches(ret, ENOENT))
-		bch_err(c, "subvolume %llu points to nonexistent snapshot %u",
-			k.k->p.offset, snapid);
+		return bch2_run_explicit_recovery_pass(c,
+					BCH_RECOVERY_PASS_reconstruct_snapshots) ?: ret;
 	if (ret)
 		return ret;
 
@@ -517,7 +518,7 @@ static void bch2_subvolume_wait_for_pagecache_and_delete(struct work_struct *wor
 		darray_exit(&s);
 	}
 
-	bch2_write_ref_put(c, BCH_WRITE_REF_snapshot_delete_pagecache);
+	enumerated_ref_put(&c->writes, BCH_WRITE_REF_snapshot_delete_pagecache);
 }
 
 struct subvolume_unlink_hook {
@@ -540,11 +541,11 @@ static int bch2_subvolume_wait_for_pagecache_and_delete_hook(struct btree_trans 
 	if (ret)
 		return ret;
 
-	if (!bch2_write_ref_tryget(c, BCH_WRITE_REF_snapshot_delete_pagecache))
+	if (!enumerated_ref_tryget(&c->writes, BCH_WRITE_REF_snapshot_delete_pagecache))
 		return -EROFS;
 
 	if (!queue_work(c->write_ref_wq, &c->snapshot_wait_for_pagecache_and_delete_work))
-		bch2_write_ref_put(c, BCH_WRITE_REF_snapshot_delete_pagecache);
+		enumerated_ref_put(&c->writes, BCH_WRITE_REF_snapshot_delete_pagecache);
 	return 0;
 }
 
@@ -729,8 +730,6 @@ int bch2_fs_upgrade_for_subvolumes(struct bch_fs *c)
 
 void bch2_fs_subvolumes_init_early(struct bch_fs *c)
 {
-	INIT_WORK(&c->snapshot_delete_work, bch2_delete_dead_snapshots_work);
 	INIT_WORK(&c->snapshot_wait_for_pagecache_and_delete_work,
 		  bch2_subvolume_wait_for_pagecache_and_delete);
-	mutex_init(&c->snapshots_unlinked_lock);
 }
